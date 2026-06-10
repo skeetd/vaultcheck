@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+reports/
+*.html
+!dashboard/templates/
+users.json
+disclosure_cases.json
+*.spec
