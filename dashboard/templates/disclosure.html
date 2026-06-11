@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — Public repos disclosure{% endblock %}
+{% block extra_css %}
+<style>
+  .safety{background:#fff8e1;border:1px solid #f3e2a8;color:#7a5e00;border-radius:8px;padding:10px 14px;font-size:12.5px;margin-bottom:18px}
+  .fetchbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  .fetchbar form{display:flex;align-items:center;gap:10px;margin:0}
+  .fetchbar select{margin:0;width:auto;padding:7px 8px}
+  .fetchbar label{display:inline;margin:0 4px 0 0;text-transform:none;font-weight:500;color:var(--soft)}
+  .counts{color:var(--soft);font-size:12.5px}
+  .counts b{color:var(--text)}
+  .case .repo{font-weight:600;font-size:14px}
+  .case .owner{color:var(--soft);font-weight:400}
+  .notice-label{font-size:11px;color:var(--soft);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 6px}
+  textarea.notice{min-height:130px;font-size:12px;resize:vertical;margin-bottom:0}
+  .acts{display:flex;gap:8px;margin-top:12px}
+  .acts form{margin:0}
+</style>
+{% endblock %}
+{% block content %}
+  <h1>Public repos — responsible disclosure</h1>
+  <div class="lead">Scan newly-created public repos for exposed secrets, review each masked finding, then send a private notice to the owner. The raw secret is never stored, shown, or used.</div>
+
+  <div class="safety"><b>Safe by design.</b> Values are masked at detection. Send notices privately to the owner — never open a public issue. Never log in with a found credential.</div>
+
+  {% with messages = get_flashed_messages(with_categories=True) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="card fetchbar">
+    <form method="POST" action="/disclosure/fetch">
+      <label>Batch</label>
+      <select name="count"><option value="5">5</option><option value="10">10</option><option value="15">15</option></select>
+      <button class="btn-primary" type="submit">Fetch &amp; scan new repos</button>
+    </form>
+    <div class="counts">
+      Pending <b>{{ counts.pending }}</b> &nbsp;·&nbsp; Approved <b>{{ counts.approved }}</b> &nbsp;·&nbsp;
+      Disclosed <b>{{ counts.disclosed }}</b> &nbsp;·&nbsp; Dismissed <b>{{ counts.dismissed }}</b>
+    </div>
+  </div>
+
+  <h2>Pending review</h2>
+  {% if pending %}
+    {% for case in pending %}
+    <div class="card case">
+      <div class="repo"><a href="https://github.com/{{ case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a>
+        <span class="owner">· owner @{{ case.owner }}</span></div>
+      <div class="table-wrap" style="margin:10px 0">
+        <table>
+          <thead><tr><th>Type</th><th>File</th><th>Line</th><th>Masked value</th></tr></thead>
+          <tbody>
+            {% for f in case.findings %}
+            <tr><td>{{ f.secret_type }}</td><td class="mono">{{ f.file }}</td><td>{{ f.line }}</td><td class="mono">{{ f.masked_value }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="notice-label">Private notice to owner (copy &amp; send)</div>
+      <textarea class="notice" readonly>{{ case.notice }}</textarea>
+      <div class="acts">
+        <form method="POST" action="/disclosure/{{ case.id }}/approve"><button class="btn-primary" type="submit">Approve</button></form>
+        <form method="POST" action="/disclosure/{{ case.id }}/dismiss"><button class="btn-danger" type="submit">Dismiss — false positive</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty">Nothing pending — hit fetch to scan new repos.</p>
+  {% endif %}
+
+  <h2>Approved — ready to disclose</h2>
+  {% if approved %}
+    {% for case in approved %}
+    <div class="card case">
+      <div class="repo"><a href="https://github.com/{{ case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a>
+        <span class="owner">· owner @{{ case.owner }}</span></div>
+      <div class="notice-label">Send this privately to the owner, then mark disclosed</div>
+      <textarea class="notice" readonly>{{ case.notice }}</textarea>
+      <div class="acts">
+        <form method="POST" action="/disclosure/{{ case.id }}/disclosed"><button class="btn-primary" type="submit">Mark disclosed</button></form>
+        <form method="POST" action="/disclosure/{{ case.id }}/dismiss"><button class="btn-danger" type="submit">Dismiss</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="empty">None approved yet.</p>
+  {% endif %}
+{% endblock %}

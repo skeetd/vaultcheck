@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — Scan repository{% endblock %}
+{% block wrapclass %}narrow{% endblock %}
+{% block content %}
+  <h1>Scan a repository</h1>
+  <div class="lead">Scan a GitHub repository for hardcoded secrets, vulnerable dependencies and insecure code.</div>
+
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+  <div class="card">
+    <form method="POST" action="/scan">
+      <label>GitHub repository URL</label>
+      <input class="mono" type="url" name="repo_url" placeholder="https://github.com/owner/repo" required>
+
+      <label>Access token</label>
+      <input class="mono" type="text" name="token" value="{{ token or '' }}" placeholder="your-access-token" required>
+
+      <button class="btn-primary" type="submit">Scan repository</button>
+    </form>
+    <div class="note" style="margin-top:14px">
+      Free plan covers secrets &amp; code analysis; Pro adds dependency vulnerability scanning.
+      Run only on repositories you own or are authorized to test.
+    </div>
+  </div>
+{% endblock %}

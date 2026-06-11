@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — Security checks{% endblock %}
+{% block wrapclass %}narrow{% endblock %}
+{% block content %}
+  <h1>Security checks</h1>
+  <div class="lead">Run a check against a target. Scanning a repository? Use <a href="/scan">Scan</a>.</div>
+
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+  <div class="card">
+    <form method="POST" action="/check">
+      <label>Check type</label>
+      <select name="check_id" id="check_id" onchange="upd()">
+        {% for c in checks %}
+        <option value="{{ c.id }}" data-type="{{ c.target_type }}" data-desc="{{ c.description }}"
+                {% if c.id == selected %}selected{% endif %}>{{ c.name }} ({{ c.tier }})</option>
+        {% endfor %}
+      </select>
+      <div class="note" id="desc" style="margin:-8px 0 14px"></div>
+
+      <label>Target</label>
+      <input class="mono" type="text" name="target" id="target" value="{{ target or '' }}" required>
+
+      <label>Access token</label>
+      <input class="mono" type="text" name="token" value="{{ token or '' }}" placeholder="your-access-token" required>
+
+      <button class="btn-primary" type="submit">Run check</button>
+    </form>
+    <div class="warn" style="margin-top:12px">Run checks against assets you own or are authorized to test.</div>
+  </div>
+
+  {% if result is defined and result %}
+  <div class="card">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <div style="font-size:15px;font-weight:600">{{ check_name }}</div>
+      <div class="mono" style="font-size:12px;color:var(--soft);overflow-wrap:anywhere">{{ result.target }}</div>
+    </div>
+    {% if result.summary %}<div class="note" style="margin-bottom:12px">{{ result.summary }}</div>{% endif %}
+    {% if result.errors %}{% for e in result.errors %}<div class="flash error">{{ e }}</div>{% endfor %}{% endif %}
+    {% if findings %}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        {% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}
+          {% if counts[sev] %}<span class="pill sev-{{ sev|lower }}">{{ sev }} {{ counts[sev] }}</span>{% endif %}
+        {% endfor %}
+      </div>
+      {% for f in findings %}
+      <div style="border-top:1px solid #eef0f3;padding:12px 0;display:flex;gap:12px;align-items:flex-start">
+        <span class="pill sev-{{ f.severity|lower }}">{{ f.severity }}</span>
+        <div>
+          <div style="font-weight:600">{{ f.title }}</div>
+          {% if f.detail %}<div class="note" style="margin-top:2px">{{ f.detail }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% elif not result.errors %}
+      <div class="flash ok" style="margin:0">No issues found.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  function upd() {
+    var s = document.getElementById('check_id');
+    if (!s || !s.options.length) return;
+    var o = s.options[s.selectedIndex];
+    var t = o.getAttribute('data-type');
+    document.getElementById('desc').textContent = o.getAttribute('data-desc') || '';
+    var ph = {url:'https://example.com', domain:'example.com', email:'you@example.com'}[t] || '';
+    document.getElementById('target').placeholder = ph;
+  }
+  upd();
+</script>
+{% endblock %}

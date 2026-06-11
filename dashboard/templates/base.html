@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}VaultCheck{% endblock %}</title>
+<style>
+  :root{
+    --bg:#eef1f4;--card:#fff;--border:#dce1e7;--text:#1f2933;--soft:#67727e;--accent:#1f2933;--link:#3b5bdb;
+    --crit:#b3261e;--crit-bg:#fdeae8;--high:#b35309;--high-bg:#fcefe0;
+    --med:#846a00;--med-bg:#fbf4d6;--low:#5a6772;--low-bg:#eceff2;
+    --green:#2f7a3d;--green-bg:#e8f5ec;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SF Mono","Cascadia Code","JetBrains Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:var(--link);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  .nav{background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;padding:0 20px;height:52px;position:sticky;top:0;z-index:50}
+  .nav .brand{font-weight:700;font-size:16px;color:var(--text);letter-spacing:-.3px;margin-right:14px}
+  .nav .brand:hover{text-decoration:none}
+  .nav .brand .vc{color:var(--link)}
+  .nav-links{display:flex;gap:2px;flex:1;flex-wrap:wrap}
+  .nav-links a{color:var(--soft);font-size:13px;font-weight:500;padding:7px 12px;border-radius:7px}
+  .nav-links a:hover{background:#f1f3f5;color:var(--text);text-decoration:none}
+  .nav-links a.active{background:#eef2ff;color:var(--link)}
+  .nav-right a{color:var(--soft);font-size:13px;padding:7px 10px}
+
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 64px}
+  .wrap.narrow{max-width:760px}
+
+  h1{font-size:20px;font-weight:700;letter-spacing:-.3px;margin-bottom:4px}
+  .lead{color:var(--soft);font-size:13px;margin-bottom:22px;max-width:720px}
+  h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--soft);margin:28px 0 14px;padding-bottom:7px;border-bottom:1px solid var(--border)}
+
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:22px;margin-bottom:20px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+
+  label{display:block;font-size:12px;font-weight:600;color:var(--soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px}
+  input,select,textarea{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text);background:#fff;font-family:var(--sans);margin-bottom:14px}
+  input.mono,textarea{font-family:var(--mono)}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:#9aa5b1}
+
+  .btn{display:inline-block;padding:9px 14px;border-radius:8px;border:1px solid var(--border);background:#fff;color:var(--text);font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans)}
+  .btn:hover{background:#f7f8fa;text-decoration:none}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:#0f1720}
+  .btn-danger{border-color:#f1b0a8;color:var(--crit);background:#fff}
+  .btn-danger:hover{background:var(--crit-bg)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  thead th{text-align:left;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--soft);background:#f7f8fa;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
+  tbody td{padding:11px 14px;border-bottom:1px solid #eef0f3;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fafbfc}
+  td.mono{font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap}
+  .sev-critical{color:var(--crit);background:var(--crit-bg)}
+  .sev-high{color:var(--high);background:var(--high-bg)}
+  .sev-medium{color:var(--med);background:var(--med-bg)}
+  .sev-low{color:var(--low);background:var(--low-bg)}
+  .pill.pro{color:var(--link);background:#eef2ff}
+  .pill.free{color:var(--soft);background:var(--low-bg)}
+
+  .flash{padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px}
+  .flash.ok{background:var(--green-bg);border:1px solid #bfe3c9;color:var(--green)}
+  .flash.error{background:var(--crit-bg);border:1px solid #f1b0a8;color:var(--crit)}
+
+  .empty{color:var(--soft);font-style:italic;padding:16px 0}
+  .note,.warn{color:var(--soft);font-size:12px}
+
+  .stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .stat{border:1px solid var(--border);border-radius:10px;padding:12px 18px;background:var(--card);min-width:110px}
+  .stat .n{font-size:26px;font-weight:700;line-height:1}
+  .stat .l{font-size:11px;color:var(--soft);text-transform:uppercase;letter-spacing:.4px;margin-top:4px}
+</style>
+{% block extra_css %}{% endblock %}
+</head>
+<body>
+<nav class="nav">
+  <a class="brand" href="/scan"><span class="vc">Vault</span>Check</a>
+  <div class="nav-links">
+    <a href="/scan" {% if request.path == '/scan' %}class="active"{% endif %}>Scan</a>
+    <a href="/check" {% if request.path == '/check' %}class="active"{% endif %}>Checks</a>
+    {% if session.admin_logged_in %}
+    <a href="/" {% if request.path == '/' %}class="active"{% endif %}>Dashboard</a>
+    <a href="/disclosure" {% if request.path == '/disclosure' %}class="active"{% endif %}>Public repos</a>
+    {% endif %}
+  </div>
+  <div class="nav-right">
+    {% if session.admin_logged_in %}<a href="/logout">Log out</a>{% else %}<a href="/login">Admin</a>{% endif %}
+  </div>
+</nav>
+<div class="wrap {% block wrapclass %}{% endblock %}">
+{% block content %}{% endblock %}
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

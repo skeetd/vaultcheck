@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — Dashboard{% endblock %}
+{% block extra_css %}
+<style>
+  .create-form{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+  .create-form .field{display:flex;flex-direction:column}
+  .create-form .field input,.create-form .field select{margin-bottom:0;min-width:180px;width:auto}
+  .create-form label{margin-bottom:5px}
+  .acts{display:flex;gap:8px;align-items:center}
+  .acts form{margin:0}
+  .plan-form{display:flex;gap:6px;align-items:center}
+  .plan-form select{margin:0;width:auto;padding:5px 8px;font-size:12px}
+  .plan-form .btn{padding:6px 10px}
+</style>
+{% endblock %}
+{% block content %}
+  {% set total = users | length %}
+  {% set pro_count = users | selectattr('plan', 'eq', 'pro') | list | length %}
+
+  <h1>Dashboard</h1>
+  <div class="lead">Manage users and their access tokens. Switch plans between free and pro.</div>
+
+  {% with messages = get_flashed_messages(with_categories=True) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="stats">
+    <div class="stat"><div class="n">{{ total }}</div><div class="l">Total users</div></div>
+    <div class="stat"><div class="n" style="color:var(--link)">{{ pro_count }}</div><div class="l">Pro</div></div>
+    <div class="stat"><div class="n" style="color:var(--soft)">{{ total - pro_count }}</div><div class="l">Free</div></div>
+  </div>
+
+  <h2>Add user</h2>
+  <form class="card create-form" method="POST" action="/users/create">
+    <div class="field"><label>Username</label><input type="text" name="username" placeholder="johndoe" required></div>
+    <div class="field"><label>Email</label><input type="email" name="email" placeholder="john@example.com" required></div>
+    <div class="field"><label>Plan</label>
+      <select name="plan"><option value="free">free</option><option value="pro">pro</option></select>
+    </div>
+    <button class="btn-primary" type="submit">Create user</button>
+  </form>
+
+  <h2>Users</h2>
+  {% if users %}
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Username</th><th>Email</th><th>Token</th><th>Plan</th><th>Scans</th><th>Created</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+    {% for user in users | sort(attribute='created_at', reverse=True) %}
+      <tr>
+        <td>{{ user.username }}</td>
+        <td style="color:var(--soft)">{{ user.email }}</td>
+        <td class="mono" style="color:var(--soft);max-width:170px">{{ user.api_token or '—' }}</td>
+        <td><span class="pill {{ user.plan }}">{{ user.plan | upper }}</span></td>
+        <td style="color:var(--soft)">{{ user.scan_count }}</td>
+        <td style="color:var(--soft)">{{ user.created_at[:10] }}</td>
+        <td>
+          <div class="acts">
+            <form class="plan-form" method="POST" action="/users/{{ user.id }}/plan">
+              <select name="plan">
+                <option value="free" {% if user.plan == 'free' %}selected{% endif %}>free</option>
+                <option value="pro"  {% if user.plan == 'pro'  %}selected{% endif %}>pro</option>
+              </select>
+              <button class="btn" type="submit">Set</button>
+            </form>
+            <form method="POST" action="/users/{{ user.id }}/delete" onsubmit="return confirm('Delete {{ user.username }}?')">
+              <button class="btn-danger" type="submit">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+    <p class="empty">No users yet — create one above.</p>
+  {% endif %}
+{% endblock %}

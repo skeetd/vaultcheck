@@ -9,7 +9,7 @@ build/
 *.egg-info/
 reports/
 *.html
-!dashboard/templates/
+!dashboard/templates/*.html
 users.json
 disclosure_cases.json
 *.spec
