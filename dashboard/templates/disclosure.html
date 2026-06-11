@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}VaultCheck — Public repos disclosure{% endblock %}
 {% block extra_css %}
+{% if job and job.status == 'running' %}<meta http-equiv="refresh" content="5">{% endif %}
 <style>
   .safety{background:#fff8e1;border:1px solid #f3e2a8;color:#7a5e00;border-radius:8px;padding:10px 14px;font-size:12.5px;margin-bottom:18px}
   .fetchbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
@@ -31,15 +32,27 @@
 
   <div class="card fetchbar">
     <form method="POST" action="/disclosure/fetch">
-      <label>Batch</label>
-      <select name="count"><option value="5">5</option><option value="10">10</option><option value="15">15</option></select>
-      <button class="btn-primary" type="submit">Fetch &amp; scan new repos</button>
+      <label>Scan until</label>
+      <input type="number" name="target" value="{{ job.target if job and job.target else 10 }}" min="1" max="50" style="width:78px;margin:0">
+      <label>findings</label>
+      <button class="btn-primary" type="submit" {% if job and job.status == 'running' %}disabled{% endif %}>
+        {% if job and job.status == 'running' %}Scanning…{% else %}Start scan{% endif %}
+      </button>
     </form>
     <div class="counts">
       Pending <b>{{ counts.pending }}</b> &nbsp;·&nbsp; Approved <b>{{ counts.approved }}</b> &nbsp;·&nbsp;
       Disclosed <b>{{ counts.disclosed }}</b> &nbsp;·&nbsp; Dismissed <b>{{ counts.dismissed }}</b>
     </div>
   </div>
+
+  {% if job and job.status == 'running' %}
+  <div class="flash ok" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <span>Scanning new public repos… <b>{{ job.scanned }}</b> repos scanned, <b>{{ job.found }}</b>/{{ job.target }} findings.</span>
+    <span class="note">auto-refreshing every 5s…</span>
+  </div>
+  {% elif job and job.status == 'done' and job.scanned %}
+  <div class="flash ok">Done — scanned {{ job.scanned }} repos, found {{ job.found }} issue(s) across {{ job.queued }} repo(s){% if job.error %} (stopped early: {{ job.error }}){% endif %}.</div>
+  {% endif %}
 
   <h2>Pending review</h2>
   {% if pending %}
@@ -49,10 +62,17 @@
         <span class="owner">· owner @{{ case.owner }}</span></div>
       <div class="table-wrap" style="margin:10px 0">
         <table>
-          <thead><tr><th>Type</th><th>File</th><th>Line</th><th>Masked value</th></tr></thead>
+          <thead><tr><th>Kind</th><th>Type</th><th>Severity</th><th>File</th><th>Line</th><th>Detail</th></tr></thead>
           <tbody>
             {% for f in case.findings %}
-            <tr><td>{{ f.secret_type }}</td><td class="mono">{{ f.file }}</td><td>{{ f.line }}</td><td class="mono">{{ f.masked_value }}</td></tr>
+            <tr>
+              <td>{{ f.kind or 'Secret' }}</td>
+              <td>{{ f.type or f.secret_type }}</td>
+              <td><span class="pill sev-{{ (f.severity or 'low')|lower }}">{{ f.severity or '—' }}</span></td>
+              <td class="mono">{{ f.file }}</td>
+              <td>{{ f.line }}</td>
+              <td class="mono">{{ f.detail or f.masked_value }}</td>
+            </tr>
             {% endfor %}
           </tbody>
         </table>

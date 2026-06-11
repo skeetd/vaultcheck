@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 from pathlib import Path
 from flask import (
     Blueprint, Flask, flash, redirect, render_template,
@@ -9,7 +10,7 @@ from dotenv import load_dotenv
 from .auth import get_admin_password, login_required
 from . import models
 from . import disclosure_store
-from vaultcheck.disclosure import build_notice, fetch_recent_public_repos, scan_repo_secrets
+from vaultcheck.disclosure import build_notice, fetch_recent_public_repos, scan_repo
 from vaultcheck.registry import get_check, list_checks
 from vaultcheck.reporter import generate_report
 from vaultcheck.scanner import run_scan
@@ -165,10 +166,50 @@ def check_page():
 
 
 # How many new public repos to pull and scan per fetch. Human-gated and bounded:
-# the scan runs synchronously in the request, so a large batch would hang the page.
-# Real volume needs a background worker (see roadmap), not a bigger number here.
-DISCLOSURE_BATCH = 5
-DISCLOSURE_MAX = 15
+# Background "scan until N findings" worker — scanning many repos is slow, so it runs
+# in a thread and the page polls job state. Bounded by DISCLOSURE_MAX_REPOS for safety.
+DISCLOSURE_DEFAULT_TARGET = 10
+DISCLOSURE_MAX_TARGET = 50
+DISCLOSURE_MAX_REPOS = 120
+
+_job = {"status": "idle", "scanned": 0, "found": 0, "queued": 0, "target": 0, "error": None}
+_job_lock = threading.Lock()
+
+
+def _run_disclosure_job(target, token):
+    page = 1
+    try:
+        while True:
+            with _job_lock:
+                if _job["found"] >= target or _job["scanned"] >= DISCLOSURE_MAX_REPOS:
+                    break
+            repos, error = fetch_recent_public_repos(limit=50, page=page)
+            if error:
+                with _job_lock:
+                    _job["error"] = error
+                break
+            if not repos:
+                break
+            for repo in repos:
+                with _job_lock:
+                    if _job["found"] >= target or _job["scanned"] >= DISCLOSURE_MAX_REPOS:
+                        break
+                if disclosure_store.repo_exists(repo["full_name"]):
+                    continue
+                findings, _errs = scan_repo(repo["url"], token)
+                with _job_lock:
+                    _job["scanned"] += 1
+                if findings:
+                    disclosure_store.add_case(repo["full_name"], repo["owner"], findings)
+                    with _job_lock:
+                        _job["queued"] += 1
+                        _job["found"] += len(findings)
+            page += 1
+            if page > 10:  # GitHub search caps at 1000 results
+                break
+    finally:
+        with _job_lock:
+            _job["status"] = "done"
 
 
 @bp.route("/disclosure")
@@ -178,40 +219,35 @@ def disclosure():
     approved = disclosure_store.list_cases("approved")
     for case in pending + approved:
         case["notice"] = build_notice(case["repo"], case["owner"], case["findings"])
+    with _job_lock:
+        job = dict(_job)
     return render_template(
         "disclosure.html",
         pending=pending,
         approved=approved,
         counts=disclosure_store.counts(),
+        job=job,
     )
 
 
 @bp.route("/disclosure/fetch", methods=["POST"])
 @login_required
 def disclosure_fetch():
-    try:
-        count = int(request.form.get("count", DISCLOSURE_BATCH))
-    except (TypeError, ValueError):
-        count = DISCLOSURE_BATCH
-    count = max(1, min(count, DISCLOSURE_MAX))
+    with _job_lock:
+        if _job["status"] == "running":
+            flash("A scan is already running.", "error")
+            return redirect(url_for("main.disclosure"))
+        try:
+            target = int(request.form.get("target", DISCLOSURE_DEFAULT_TARGET))
+        except (TypeError, ValueError):
+            target = DISCLOSURE_DEFAULT_TARGET
+        target = max(1, min(target, DISCLOSURE_MAX_TARGET))
+        _job.update({"status": "running", "scanned": 0, "found": 0, "queued": 0,
+                     "target": target, "error": None})
 
-    repos, error = fetch_recent_public_repos(limit=count, since_minutes=180)
-    if error:
-        flash(f"GitHub fetch failed: {error}", "error")
-        return redirect(url_for("main.disclosure"))
-
-    scanned = 0
-    queued = 0
-    for repo in repos:
-        if disclosure_store.repo_exists(repo["full_name"]):
-            continue
-        findings, _errs = scan_repo_secrets(repo["url"])
-        scanned += 1
-        if findings:
-            disclosure_store.add_case(repo["full_name"], repo["owner"], findings)
-            queued += 1
-
-    flash(f"Scanned {scanned} new public repo(s); {queued} with potential secrets queued for review.", "ok")
+    token = os.environ.get("GITHUB_TOKEN")
+    threading.Thread(target=_run_disclosure_job, args=(target, token), daemon=True).start()
+    flash(f"Scanning new public repos until {target} findings…", "ok")
     return redirect(url_for("main.disclosure"))
 
 

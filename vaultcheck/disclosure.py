@@ -15,6 +15,7 @@ import os
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from .scanner import run_scan
 
@@ -32,8 +33,8 @@ def _gh_headers() -> dict:
     return headers
 
 
-def fetch_recent_public_repos(limit: int = 5, since_minutes: int = 180):
-    """Return (repos, error). Throttled by design — caller passes a small limit.
+def fetch_recent_public_repos(limit: int = 50, since_minutes: int = 720, page: int = 1):
+    """Return (repos, error). Supports pagination so a worker can keep pulling new repos.
 
     A GITHUB_TOKEN raises the rate limit substantially; without it GitHub search
     is limited to ~10 requests/minute.
@@ -45,7 +46,8 @@ def fetch_recent_public_repos(limit: int = 5, since_minutes: int = 180):
         "q": f"created:>{since}",
         "sort": "updated",
         "order": "desc",
-        "per_page": min(max(limit, 1), 30),
+        "per_page": min(max(limit, 1), 100),
+        "page": max(page, 1),
     })
     req = urllib.request.Request(f"{GITHUB_SEARCH}?{query}", headers=_gh_headers())
     try:
@@ -71,39 +73,49 @@ def fingerprint(repo_full_name: str, secret_type: str, file: str, line: int) -> 
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-def scan_repo_secrets(repo_url: str):
-    """Scan a repo for secrets and return (masked_findings, errors).
+def scan_repo(repo_url: str, token: Optional[str] = None):
+    """Scan a repo for exposures and return (findings, errors).
 
-    matched_value is already masked by the scanner — the raw secret never exists
-    outside the regex match and is not returned here.
+    Covers secrets (masked at detection — the raw value is never retained) AND
+    insecure code patterns, so it finds more than just API keys. Each finding:
+    {kind, type, severity, file, line, detail}.
     """
-    result = run_scan(repo_url, phases=("secrets",), github_token=os.environ.get("GITHUB_TOKEN"))
-    findings = [
-        {
-            "secret_type": f.secret_type,
-            "file": f.file,
-            "line": f.line_number,
-            "masked_value": f.matched_value,
-            "severity": f.severity,
-        }
-        for f in result.secrets
-    ]
+    result = run_scan(repo_url, phases=("secrets", "code"),
+                      github_token=token or os.environ.get("GITHUB_TOKEN"))
+    findings = []
+    for f in result.secrets:
+        findings.append({"kind": "Secret", "type": f.secret_type, "severity": f.severity,
+                         "file": f.file, "line": f.line_number, "detail": f.matched_value})
+    for c in result.code:
+        findings.append({"kind": "Code", "type": c.issue_type, "severity": c.severity,
+                         "file": c.file, "line": c.line_number, "detail": c.description})
     return findings, result.errors
 
 
 def build_notice(repo_full_name: str, owner: str, findings: list[dict]) -> str:
-    """A private, polite, actionable disclosure message for the repo owner."""
+    """A private, polite, actionable disclosure message for the repo owner.
+
+    Tolerant of both the new finding shape (kind/type/detail) and older stored
+    cases (secret_type/masked_value).
+    """
+    def kind(f): return f.get("kind", "Secret")
+    def typ(f):  return f.get("type") or f.get("secret_type") or "Issue"
+
     items = "\n".join(
-        f"  - {f['secret_type']} in {f['file']}:{f['line']} (value masked: {f['masked_value']})"
+        f"  - [{f.get('severity', '?')}] {kind(f)}: {typ(f)} in {f.get('file')}:{f.get('line')}"
         for f in findings
+    )
+    has_secret = any(kind(f) == "Secret" for f in findings)
+    secret_line = (
+        "\n\nThe items marked 'Secret' look like hardcoded credentials — please rotate "
+        "them and remove them from the repository history (e.g. with `git filter-repo`)."
+        if has_secret else ""
     )
     return (
         f"Hello @{owner},\n\n"
-        f"An automated security scan flagged what appear to be hardcoded credentials "
-        f"committed to your public repository {repo_full_name}:\n\n"
-        f"{items}\n\n"
-        "If these are real, please rotate them right away and remove them from the "
-        "repository history (e.g. with `git filter-repo`). For your safety the actual "
-        "secret values were never stored or used — only their type and location.\n\n"
+        f"An automated security scan flagged potential issues in your public repository "
+        f"{repo_full_name}:\n\n{items}{secret_line}\n\n"
+        "For your safety, any secret values were never stored or used — only their type "
+        "and location.\n\n"
         "— Automated responsible-disclosure notice from VaultCheck"
     )
