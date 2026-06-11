@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from .auth import get_admin_password, login_required
 from . import models
 from . import disclosure_store
+from . import scan_store
 from vaultcheck.disclosure import build_notice, fetch_recent_public_repos, scan_repo
 from vaultcheck.registry import get_check, list_checks
 from vaultcheck.reporter import generate_report
@@ -50,7 +51,8 @@ def logout():
 @login_required
 def index():
     users = models.list_users()
-    return render_template("admin.html", users=users)
+    return render_template("admin.html", users=users,
+                           stats=scan_store.stats(), recent=scan_store.recent(8))
 
 
 @bp.route("/users/create", methods=["POST"])
@@ -94,6 +96,32 @@ def delete_user(user_id: str):
     return redirect(url_for("main.index"))
 
 
+@bp.route("/users/<user_id>")
+@login_required
+def user_detail(user_id: str):
+    user = models.get_user(user_id)
+    if not user:
+        flash("User not found.", "error")
+        return redirect(url_for("main.index"))
+    return render_template("user_detail.html", user=user,
+                           effective=models.effective_plan(user),
+                           scans=scan_store.list_for_user(user_id),
+                           used=scan_store.count_this_month(user_id),
+                           quota=FREE_MONTHLY_QUOTA)
+
+
+@bp.route("/users/<user_id>/pro", methods=["POST"])
+@login_required
+def set_pro(user_id: str):
+    until = (request.form.get("until") or "").strip() or None
+    amount = (request.form.get("amount") or "").strip()
+    if models.set_pro_until(user_id, until, amount):
+        flash(f"Marked Pro{(' until ' + until) if until else ' (no expiry)'}.", "ok")
+    else:
+        flash("User not found.", "error")
+    return redirect(url_for("main.user_detail", user_id=user_id))
+
+
 @bp.route("/scan", methods=["GET", "POST"])
 def scan():
     """Public self-serve scan: a user submits their own repo with their access token."""
@@ -113,19 +141,27 @@ def scan():
             token=token,
         ), 400
 
-    phases = PLAN_PHASES.get(user["plan"], PLAN_PHASES["free"])
+    plan = models.effective_plan(user)
+    if plan != "pro" and scan_store.count_this_month(user["id"]) >= FREE_MONTHLY_QUOTA:
+        return render_template("scan.html", token=token,
+            error=f"Free plan limit reached ({FREE_MONTHLY_QUOTA} scans/month). Upgrade to Pro for unlimited."), 429
+
+    phases = PLAN_PHASES.get(plan, PLAN_PHASES["free"])
     result = run_scan(repo_url, phases=phases, github_token=os.environ.get("GITHUB_TOKEN"))
     models.increment_scan_count(user["id"])
 
     if result.errors:
         return render_template("scan.html", error="; ".join(result.errors), token=token), 502
 
-    upgrade_hint = "Upgrade to Pro to enable dependency scanning." if user["plan"] == "free" else None
+    scan_store.add_scan(user["id"], "repo", repo_url, result.severity_counts, result.total)
+    upgrade_hint = "Upgrade to Pro to enable dependency scanning." if plan == "free" else None
     return generate_report(result, upgrade_hint=upgrade_hint)
 
 
 # repo -> richer /scan flow ; password -> CLI only (don't POST plaintext to the server)
 _WEB_CHECK_EXCLUDE = ("repo", "password")
+
+FREE_MONTHLY_QUOTA = 20  # free plan: scans per calendar month (pro = unlimited)
 
 
 @bp.route("/check", methods=["GET", "POST"])
@@ -148,10 +184,13 @@ def check_page():
     chk = get_check(check_id)
     if chk is None or chk.target_type in _WEB_CHECK_EXCLUDE:
         return back("Pick a valid check type.", 400)
-    if chk.tier == "pro" and user["plan"] != "pro":
+    plan = models.effective_plan(user)
+    if chk.tier == "pro" and plan != "pro":
         return back(f"The '{chk.name}' check requires a Pro plan.", 403)
     if not target:
         return back("Enter a target to check.", 400)
+    if plan != "pro" and scan_store.count_this_month(user["id"]) >= FREE_MONTHLY_QUOTA:
+        return back(f"Free plan limit reached ({FREE_MONTHLY_QUOTA} scans/month). Upgrade to Pro for unlimited.", 429)
 
     result = chk.run(target)
     models.increment_scan_count(user["id"])
@@ -159,10 +198,26 @@ def check_page():
     order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     findings = sorted(result.findings, key=lambda f: order.get(f.severity, 9))
     counts = {s: sum(1 for f in result.findings if f.severity == s) for s in order}
+    scan_store.add_scan(user["id"], f"check:{check_id}", target, counts, len(result.findings))
 
     return render_template("check.html", checks=checks, result=result, findings=findings,
                            counts=counts, selected=check_id, target=target, token=token,
                            check_name=chk.name)
+
+
+@bp.route("/history", methods=["GET", "POST"])
+def history():
+    """Per-user scan history — gated by the user's own access token."""
+    token = (request.values.get("token") or "").strip()
+    if not token:
+        return render_template("history.html")
+    user = models.get_user_by_token(token)
+    if not user:
+        return render_template("history.html", error="Invalid access token.", token=token), 403
+    return render_template("history.html", token=token, user=user,
+                           scans=scan_store.list_for_user(user["id"]),
+                           quota=FREE_MONTHLY_QUOTA,
+                           used=scan_store.count_this_month(user["id"]))
 
 
 # How many new public repos to pull and scan per fetch. Human-gated and bounded:

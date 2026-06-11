@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — {{ user.username }}{% endblock %}
+{% block extra_css %}
+<style>
+  .meta{display:flex;gap:28px;flex-wrap:wrap;font-size:13px}
+  .meta .note{margin-bottom:2px}
+  .bill{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}
+  .bill input{margin:0;width:auto}
+</style>
+{% endblock %}
+{% block content %}
+  <div style="margin-bottom:8px"><a href="/">&larr; Dashboard</a></div>
+  <h1>{{ user.username }}</h1>
+  <div class="lead">{{ user.email }} ·
+    <span class="pill {{ effective }}">{{ effective|upper }}</span>
+    {% if user.plan == 'pro' and effective == 'free' %}<span class="note"> (pro expired)</span>{% endif %}
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=True) %}
+    {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+  {% endwith %}
+
+  <div class="card meta">
+    <div><div class="note">Access token</div><div class="mono" style="font-size:12px;word-break:break-all;max-width:280px">{{ user.api_token }}</div></div>
+    <div><div class="note">Created</div>{{ user.created_at[:10] }}</div>
+    <div><div class="note">Scans this month</div>{{ used }}{% if effective != 'pro' %} / {{ quota }}{% endif %}</div>
+    <div><div class="note">Pro until</div>{{ user.pro_until or '—' }}</div>
+    {% if user.paid_at %}<div><div class="note">Last paid</div>{{ user.paid_at[:10] }}{% if user.paid_amount %} ({{ user.paid_amount }}){% endif %}</div>{% endif %}
+  </div>
+
+  <h2>Billing</h2>
+  <div class="card">
+    <form class="bill" method="POST" action="/users/{{ user.id }}/pro">
+      <div><label>Pro until (blank = no expiry)</label><input type="date" name="until"></div>
+      <div><label>Amount (optional)</label><input type="text" name="amount" placeholder="$9" style="width:120px"></div>
+      <button class="btn-primary" type="submit">Mark paid &rarr; Pro</button>
+    </form>
+    <form method="POST" action="/users/{{ user.id }}/plan" style="margin-top:12px">
+      <input type="hidden" name="plan" value="free">
+      <button class="btn" type="submit">Downgrade to Free</button>
+    </form>
+  </div>
+
+  <h2>Scan history</h2>
+  {% if scans %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When</th><th>Type</th><th>Target</th><th>Findings</th></tr></thead>
+      <tbody>
+        {% for s in scans %}
+        <tr>
+          <td style="color:var(--soft);white-space:nowrap">{{ s.created_at[:16].replace('T',' ') }}</td>
+          <td>{{ s.kind }}</td>
+          <td class="mono" style="overflow-wrap:anywhere">{{ s.target }}</td>
+          <td>
+            {% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}{% if s.counts[sev] %}<span class="pill sev-{{ sev|lower }}">{{ s.counts[sev] }}</span> {% endif %}{% endfor %}
+            {% if not s.total %}<span class="note">clean</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="empty">No scans yet.</p>{% endif %}
+{% endblock %}

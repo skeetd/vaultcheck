@@ -85,6 +85,7 @@
   <div class="nav-links">
     <a href="/scan" {% if request.path == '/scan' %}class="active"{% endif %}>Scan</a>
     <a href="/check" {% if request.path == '/check' %}class="active"{% endif %}>Checks</a>
+    <a href="/history" {% if request.path == '/history' %}class="active"{% endif %}>My scans</a>
     {% if session.admin_logged_in %}
     <a href="/" {% if request.path == '/' %}class="active"{% endif %}>Dashboard</a>
     <a href="/disclosure" {% if request.path == '/disclosure' %}class="active"{% endif %}>Public repos</a>

@@ -12,4 +12,5 @@ reports/
 !dashboard/templates/*.html
 users.json
 disclosure_cases.json
+scans.json
 *.spec

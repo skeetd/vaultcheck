@@ -17,6 +17,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+from .deps_scanner import _fixed_version, _query_osv, _severity_from_vuln
 
 
 @dataclass
@@ -300,3 +303,277 @@ def check_typosquat(domain: str) -> CheckResult:
             errors.append(f"{variant}: {exc}")
     return CheckResult("typosquat", domain, findings, errors,
                        summary=f"Checked {checked} look-alikes; {len(findings)} registered.")
+
+
+def _hostname(target: str) -> str:
+    if target.startswith(("http://", "https://")):
+        target = urllib.parse.urlparse(target).hostname or target
+    return target.strip().strip("/").lower().rstrip(".")
+
+
+def check_subdomains(domain: str) -> CheckResult:
+    """Discover subdomains from Certificate Transparency logs (crt.sh). Passive."""
+    domain = _hostname(domain)
+    if not domain:
+        return CheckResult("subdomains", domain, [], ["Enter a domain like example.com."])
+    try:
+        req = urllib.request.Request(
+            f"https://crt.sh/?q={urllib.parse.quote('%.' + domain)}&output=json",
+            headers={"User-Agent": "vaultcheck"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read() or "[]")
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("subdomains", domain, [], [f"crt.sh lookup failed: {exc}"])
+
+    subs = set()
+    for entry in data:
+        for name in str(entry.get("name_value", "")).splitlines():
+            name = name.strip().lower().lstrip("*.")
+            if name.endswith(domain) and name != domain:
+                subs.add(name)
+    findings = [CheckFinding("LOW", s, "Subdomain found in certificate transparency logs.")
+                for s in sorted(subs)[:100]]
+    return CheckResult("subdomains", domain, findings, [],
+                       summary=f"Found {len(subs)} unique subdomain(s) in CT logs.")
+
+
+def _tls_supports(host: str, version) -> Optional[bool]:
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        ctx.minimum_version = version
+        ctx.maximum_version = version
+    except (ValueError, OSError):
+        return None  # local OpenSSL cannot negotiate this version
+    try:
+        with socket.create_connection((host, 443), timeout=8) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host):
+                return True
+    except (ssl.SSLError, OSError):
+        return False
+
+
+def check_tls(target: str) -> CheckResult:
+    """Deep TLS check: deprecated protocols (TLS 1.0/1.1) and certificate detail."""
+    host = _hostname(target)
+    if not host:
+        return CheckResult("tls", target, [], ["Enter a domain like example.com."])
+    findings, errors = [], []
+
+    for label, ver, sev in (("TLS 1.0", ssl.TLSVersion.TLSv1, "HIGH"),
+                            ("TLS 1.1", ssl.TLSVersion.TLSv1_1, "MEDIUM")):
+        if _tls_supports(host, ver):
+            findings.append(CheckFinding(sev, f"{label} is supported (deprecated)",
+                                         f"Disable {label}; serve TLS 1.2+ only."))
+
+    summary = ""
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((host, 443), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                cert = ssock.getpeercert()
+        issuer = dict(x[0] for x in cert.get("issuer", [])).get("organizationName", "?")
+        days = int((ssl.cert_time_to_seconds(cert["notAfter"]) - time.time()) / 86400)
+        if days < 0:
+            findings.append(CheckFinding("CRITICAL", "TLS certificate expired", f"Expired {abs(days)} day(s) ago."))
+        elif days < 30:
+            findings.append(CheckFinding("HIGH" if days < 15 else "MEDIUM",
+                                         "TLS certificate expiring soon", f"{days} day(s) left."))
+        summary = f"Issuer: {issuer}; certificate valid for {days} more day(s)."
+    except ssl.SSLCertVerificationError as exc:
+        findings.append(CheckFinding("HIGH", "TLS certificate invalid", str(exc)))
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"TLS connection failed: {exc}")
+
+    return CheckResult("tls", host, findings, errors, summary=summary)
+
+
+def check_cors(url: str) -> CheckResult:
+    """Probe for a reflected/permissive CORS policy. One request."""
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    host = urllib.parse.urlparse(url).hostname
+    if not host or not _resolves_public(host):
+        return CheckResult("cors", url, [], ["Refusing to probe a private or unresolvable host."])
+    test_origin = "https://vaultcheck-cors-probe.example"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "vaultcheck", "Origin": test_origin})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            acao = resp.headers.get("Access-Control-Allow-Origin")
+            acac = (resp.headers.get("Access-Control-Allow-Credentials") or "").lower() == "true"
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("cors", url, [], [f"Request failed: {exc}"])
+
+    findings = []
+    if acao == test_origin and acac:
+        findings.append(CheckFinding("HIGH", "CORS reflects any origin with credentials",
+                                     "Access-Control-Allow-Origin echoes the request Origin AND allows credentials — any site can read authenticated responses."))
+    elif acao == test_origin:
+        findings.append(CheckFinding("MEDIUM", "CORS reflects any origin",
+                                     "Access-Control-Allow-Origin echoes the request Origin — restrict it to known domains."))
+    elif acao == "*":
+        findings.append(CheckFinding("LOW", "CORS allows all origins (*)",
+                                     "Fine for public data, risky for anything authenticated."))
+    return CheckResult("cors", url, findings, [],
+                       summary="No permissive CORS detected." if not findings else "")
+
+
+_EXPOSED_PATHS = [
+    ("/.git/HEAD", "ref:"),
+    ("/.env", "="),
+    ("/.svn/entries", ""),
+    ("/.DS_Store", ""),
+    ("/.aws/credentials", "aws_"),
+    ("/server-status", "Apache"),
+    ("/backup.zip", ""),
+]
+
+
+def check_exposed_files(url: str) -> CheckResult:
+    """Probe for commonly-exposed sensitive files. Authorized targets only."""
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+    if not host or not _resolves_public(host):
+        return CheckResult("exposed-files", url, [], ["Refusing to probe a private or unresolvable host."])
+    base = f"{parsed.scheme}://{host}"
+    findings = []
+    for path, marker in _EXPOSED_PATHS:
+        try:
+            req = urllib.request.Request(base + path, headers={"User-Agent": "vaultcheck"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    body = resp.read(2048).decode("utf-8", "replace")
+                    if not marker or marker.lower() in body.lower():
+                        findings.append(CheckFinding("HIGH", f"Exposed: {path}",
+                                                     "Publicly accessible — block or remove it."))
+        except Exception:  # noqa: BLE001
+            continue
+    return CheckResult("exposed-files", base, findings, [],
+                       summary="None of the probed paths were exposed." if not findings else "")
+
+
+def check_rdap(domain: str) -> CheckResult:
+    """Domain registration info (age, registrar, expiry) via RDAP."""
+    domain = _hostname(domain)
+    if not domain:
+        return CheckResult("rdap", domain, [], ["Enter a domain like example.com."])
+    try:
+        req = urllib.request.Request(f"https://rdap.org/domain/{urllib.parse.quote(domain)}",
+                                     headers={"User-Agent": "vaultcheck", "Accept": "application/rdap+json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("rdap", domain, [], [f"RDAP lookup failed: {exc}"])
+
+    events = {e.get("eventAction"): e.get("eventDate") for e in data.get("events", [])}
+    reg, exp = events.get("registration"), events.get("expiration")
+    registrar = "?"
+    try:
+        for ent in data.get("entities", []):
+            if "registrar" in ent.get("roles", []):
+                for v in ent.get("vcardArray", [[], []])[1]:
+                    if v[0] == "fn":
+                        registrar = v[3]
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _days_since(iso):
+        try:
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            return (datetime.now(timezone.utc) - dt).days
+        except Exception:  # noqa: BLE001
+            return None
+
+    findings = []
+    age = _days_since(reg) if reg else None
+    if age is not None and age < 90:
+        findings.append(CheckFinding("MEDIUM", "Recently registered domain",
+                                     f"Registered {age} day(s) ago — a common phishing indicator."))
+    if exp:
+        left = _days_since(exp)
+        if left is not None and left > -30:  # within 30 days of (or past) expiry
+            findings.append(CheckFinding("MEDIUM", "Domain expiring soon", f"{-left} day(s) until expiry."))
+    return CheckResult("rdap", domain, findings, [],
+                       summary=f"Registered {reg or '?'}, expires {exp or '?'}, registrar {registrar}.")
+
+
+def check_caa(domain: str) -> CheckResult:
+    """CAA records — which CAs may issue certificates for the domain."""
+    domain = _hostname(domain)
+    if not domain:
+        return CheckResult("caa", domain, [], ["Enter a domain like example.com."])
+    try:
+        answers = _doh(domain, "CAA").get("Answer", [])
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("caa", domain, [], [f"DNS lookup failed: {exc}"])
+    issuers = [a.get("data", "").strip() for a in answers if a.get("data")]
+    if not issuers:
+        return CheckResult("caa", domain, [
+            CheckFinding("LOW", "No CAA record",
+                         "Without CAA, any certificate authority can issue certs for this domain. Add a CAA record to restrict it.")
+        ], [], summary="No CAA records found.")
+    return CheckResult("caa", domain, [], [],
+                       summary=f"{len(issuers)} CAA record(s): " + ("; ".join(issuers))[:200])
+
+
+def check_package(target: str) -> CheckResult:
+    """Look up a single package@version against OSV. Format: [ecosystem:]name@version."""
+    spec = target.strip()
+    eco = "PyPI"
+    if ":" in spec and "@" in spec and spec.index(":") < spec.index("@"):
+        eco, spec = spec.split(":", 1)
+    if "@" not in spec:
+        return CheckResult("package", target, [],
+                           ["Use name@version, e.g. flask@0.12.2 (or npm:lodash@4.17.0)."])
+    name, version = (p.strip() for p in spec.rsplit("@", 1))
+    eco_map = {"pypi": "PyPI", "pip": "PyPI", "npm": "npm", "go": "Go", "rubygems": "RubyGems",
+               "gem": "RubyGems", "crates": "crates.io", "cargo": "crates.io",
+               "packagist": "Packagist", "composer": "Packagist"}
+    eco = eco_map.get(eco.lower(), eco)
+    try:
+        vulns = _query_osv(name, version, eco)
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("package", target, [], [f"OSV query failed: {exc}"])
+    findings = []
+    for v in vulns:
+        fix = _fixed_version(v)
+        detail = (v.get("summary", "") or "")[:150] + (f" — fixed in {fix}" if fix else "")
+        findings.append(CheckFinding(_severity_from_vuln(v), v.get("id", "UNKNOWN"), detail))
+    return CheckResult("package", f"{eco}:{name}@{version}", findings, [],
+                       summary=f"{len(findings)} known vulnerabilit{'y' if len(findings) == 1 else 'ies'} for {name} {version}.")
+
+
+def check_cve(keyword: str) -> CheckResult:
+    """Search NVD for recent CVEs matching a keyword (no API key; rate-limited)."""
+    keyword = keyword.strip()
+    if not keyword:
+        return CheckResult("cve", keyword, [], ["Enter a product or keyword, e.g. openssl."])
+    url = ("https://services.nvd.nist.gov/rest/json/cves/2.0?"
+           + urllib.parse.urlencode({"keywordSearch": keyword, "resultsPerPage": 10}))
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "vaultcheck"})
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("cve", keyword, [], [f"NVD query failed (rate-limited without a key?): {exc}"])
+
+    findings = []
+    for item in data.get("vulnerabilities", [])[:10]:
+        cve = item.get("cve", {})
+        cid = cve.get("id", "CVE-?")
+        desc = next((d["value"] for d in cve.get("descriptions", []) if d.get("lang") == "en"), "")
+        sev = "MEDIUM"
+        for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+            metrics = cve.get("metrics", {}).get(key)
+            if metrics:
+                base = metrics[0].get("cvssData", {}).get("baseScore")
+                if base is not None:
+                    sev = "CRITICAL" if base >= 9 else "HIGH" if base >= 7 else "MEDIUM" if base >= 4 else "LOW"
+                break
+        findings.append(CheckFinding(sev, cid, desc[:200]))
+    return CheckResult("cve", keyword, findings, [],
+                       summary=f"{data.get('totalResults', len(findings))} total match(es); showing {len(findings)}.")

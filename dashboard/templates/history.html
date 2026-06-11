@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — My scans{% endblock %}
+{% block wrapclass %}narrow{% endblock %}
+{% block content %}
+  <h1>My scans</h1>
+  <div class="lead">Your scan history is private to your access token — only you can see it.</div>
+
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+
+  <div class="card">
+    <form method="GET" action="/history">
+      <label>Access token</label>
+      <input class="mono" type="text" name="token" value="{{ token or '' }}" placeholder="your-access-token" required>
+      <button class="btn-primary" type="submit">Show my scans</button>
+    </form>
+  </div>
+
+  {% if user %}
+  <div class="lead" style="margin-bottom:14px">
+    {{ user.username }} · plan <span class="pill {{ user.plan }}">{{ user.plan|upper }}</span>
+    {% if user.plan != 'pro' %} · <b>{{ used }}/{{ quota }}</b> scans this month{% endif %}
+  </div>
+  {% if scans %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When</th><th>Type</th><th>Target</th><th>Findings</th></tr></thead>
+      <tbody>
+        {% for s in scans %}
+        <tr>
+          <td style="color:var(--soft);white-space:nowrap">{{ s.created_at[:16].replace('T',' ') }}</td>
+          <td>{{ s.kind }}</td>
+          <td class="mono" style="overflow-wrap:anywhere">{{ s.target }}</td>
+          <td>
+            {% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}{% if s.counts[sev] %}<span class="pill sev-{{ sev|lower }}">{{ s.counts[sev] }}</span> {% endif %}{% endfor %}
+            {% if not s.total %}<span class="note">clean</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No scans yet — run one from Scan or Checks.</p>
+  {% endif %}
+  {% endif %}
+{% endblock %}

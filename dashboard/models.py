@@ -64,8 +64,34 @@ def update_plan(user_id: str, plan: str) -> Optional[dict]:
     if user_id not in data:
         return None
     data[user_id]["plan"] = plan
+    if plan != "pro":
+        data[user_id]["pro_until"] = None
     _save(data)
     return data[user_id]
+
+
+def set_pro_until(user_id: str, until: Optional[str], amount: str = "") -> Optional[dict]:
+    """Mark a user Pro, optionally until a date (YYYY-MM-DD). None = no expiry."""
+    data = _load()
+    if user_id not in data:
+        return None
+    data[user_id]["plan"] = "pro"
+    data[user_id]["pro_until"] = until
+    data[user_id]["paid_at"] = datetime.utcnow().isoformat()
+    if amount:
+        data[user_id]["paid_amount"] = amount
+    _save(data)
+    return data[user_id]
+
+
+def effective_plan(user: dict) -> str:
+    """Pro auto-downgrades to free once pro_until has passed."""
+    plan = user.get("plan", "free")
+    if plan == "pro":
+        until = user.get("pro_until")
+        if until and until[:10] < datetime.utcnow().strftime("%Y-%m-%d"):
+            return "free"
+    return plan
 
 
 def delete_user(user_id: str) -> bool:

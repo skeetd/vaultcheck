@@ -66,7 +66,7 @@
     var o = s.options[s.selectedIndex];
     var t = o.getAttribute('data-type');
     document.getElementById('desc').textContent = o.getAttribute('data-desc') || '';
-    var ph = {url:'https://example.com', domain:'example.com', email:'you@example.com'}[t] || '';
+    var ph = {url:'https://example.com', domain:'example.com', email:'you@example.com', package:'flask@0.12.2', keyword:'openssl'}[t] || '';
     document.getElementById('target').placeholder = ph;
   }
   upd();

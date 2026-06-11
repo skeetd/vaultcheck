@@ -32,6 +32,32 @@
     <div class="stat"><div class="n" style="color:var(--soft)">{{ total - pro_count }}</div><div class="l">Free</div></div>
   </div>
 
+  {% if stats %}
+  <h2>Usage</h2>
+  <div class="stats">
+    <div class="stat"><div class="n">{{ stats.total }}</div><div class="l">Total scans</div></div>
+    <div class="stat"><div class="n">{{ stats.today }}</div><div class="l">Scans today</div></div>
+    <div class="stat"><div class="n">{{ stats.findings }}</div><div class="l">Findings found</div></div>
+  </div>
+  {% if recent %}
+  <div class="table-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>When</th><th>Type</th><th>Target</th><th>Findings</th></tr></thead>
+      <tbody>
+        {% for s in recent %}
+        <tr>
+          <td style="color:var(--soft);white-space:nowrap">{{ s.created_at[:16].replace('T',' ') }}</td>
+          <td>{{ s.kind }}</td>
+          <td class="mono" style="color:var(--soft);overflow-wrap:anywhere">{{ s.target }}</td>
+          <td>{{ s.total }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+
   <h2>Add user</h2>
   <form class="card create-form" method="POST" action="/users/create">
     <div class="field"><label>Username</label><input type="text" name="username" placeholder="johndoe" required></div>
@@ -52,7 +78,7 @@
     <tbody>
     {% for user in users | sort(attribute='created_at', reverse=True) %}
       <tr>
-        <td>{{ user.username }}</td>
+        <td><a href="/users/{{ user.id }}">{{ user.username }}</a></td>
         <td style="color:var(--soft)">{{ user.email }}</td>
         <td class="mono" style="color:var(--soft);max-width:170px">{{ user.api_token or '—' }}</td>
         <td><span class="pill {{ user.plan }}">{{ user.plan | upper }}</span></td>
