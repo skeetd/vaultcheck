@@ -46,7 +46,8 @@ def repo_exists(repo_full_name: str) -> bool:
     return any(c["repo"] == repo_full_name for c in _load().values())
 
 
-def add_case(repo_full_name: str, owner: str, findings: list[dict]) -> Optional[dict]:
+def add_case(repo_full_name: str, owner: str, findings: list[dict],
+             repo_url: Optional[str] = None) -> Optional[dict]:
     """Add a new case unless this repo is already tracked (dedupe by repo)."""
     if repo_exists(repo_full_name):
         return None
@@ -56,6 +57,7 @@ def add_case(repo_full_name: str, owner: str, findings: list[dict]) -> Optional[
         "id": cid,
         "repo": repo_full_name,
         "owner": owner,
+        "repo_url": repo_url or f"https://github.com/{repo_full_name}",
         "findings": findings,  # masked only
         "status": "pending",
         "created_at": _now(),

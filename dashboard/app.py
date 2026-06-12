@@ -11,7 +11,7 @@ from .auth import get_admin_password, login_required
 from . import models
 from . import disclosure_store
 from . import scan_store
-from vaultcheck.disclosure import build_notice, fetch_recent_public_repos, scan_repo
+from vaultcheck.disclosure import SOURCES, build_notice, scan_repo
 from vaultcheck.registry import get_check, list_checks
 from vaultcheck.reporter import generate_report
 from vaultcheck.scanner import run_scan
@@ -123,39 +123,23 @@ def set_pro(user_id: str):
 
 
 @bp.route("/scan", methods=["GET", "POST"])
+@login_required
 def scan():
-    """Public self-serve scan: a user submits their own repo with their access token."""
+    """Scan a public repo for secrets, vulnerable dependencies and insecure code."""
     if request.method == "GET":
         return render_template("scan.html")
 
-    token = request.form.get("token", "").strip()
     repo_url = request.form.get("repo_url", "").strip()
-
-    user = models.get_user_by_token(token)
-    if not user:
-        return render_template("scan.html", error="Invalid access token.", token=token), 403
     if not _GITHUB_URL_RE.match(repo_url):
-        return render_template(
-            "scan.html",
-            error="Enter a valid public GitHub repo URL, e.g. https://github.com/owner/repo",
-            token=token,
-        ), 400
+        return render_template("scan.html",
+            error="Enter a valid public GitHub repo URL, e.g. https://github.com/owner/repo"), 400
 
-    plan = models.effective_plan(user)
-    if plan != "pro" and scan_store.count_this_month(user["id"]) >= FREE_MONTHLY_QUOTA:
-        return render_template("scan.html", token=token,
-            error=f"Free plan limit reached ({FREE_MONTHLY_QUOTA} scans/month). Upgrade to Pro for unlimited."), 429
-
-    phases = PLAN_PHASES.get(plan, PLAN_PHASES["free"])
-    result = run_scan(repo_url, phases=phases, github_token=os.environ.get("GITHUB_TOKEN"))
-    models.increment_scan_count(user["id"])
-
+    result = run_scan(repo_url, github_token=os.environ.get("GITHUB_TOKEN"))
     if result.errors:
-        return render_template("scan.html", error="; ".join(result.errors), token=token), 502
+        return render_template("scan.html", error="; ".join(result.errors)), 502
 
-    scan_store.add_scan(user["id"], "repo", repo_url, result.severity_counts, result.total)
-    upgrade_hint = "Upgrade to Pro to enable dependency scanning." if plan == "free" else None
-    return generate_report(result, upgrade_hint=upgrade_hint)
+    scan_store.add_scan("admin", "repo", repo_url, result.severity_counts, result.total)
+    return generate_report(result)
 
 
 # repo -> richer /scan flow ; password -> CLI only (don't POST plaintext to the server)
@@ -165,59 +149,40 @@ FREE_MONTHLY_QUOTA = 20  # free plan: scans per calendar month (pro = unlimited)
 
 
 @bp.route("/check", methods=["GET", "POST"])
+@login_required
 def check_page():
     checks = [c for c in list_checks() if c.target_type not in _WEB_CHECK_EXCLUDE]
     if request.method == "GET":
         return render_template("check.html", checks=checks)
 
-    token = request.form.get("token", "").strip()
     check_id = request.form.get("check_id", "").strip()
     target = request.form.get("target", "").strip()
 
     def back(msg, code):
         return render_template("check.html", checks=checks, error=msg,
-                               token=token, selected=check_id, target=target), code
+                               selected=check_id, target=target), code
 
-    user = models.get_user_by_token(token)
-    if not user:
-        return back("Invalid access token.", 403)
     chk = get_check(check_id)
     if chk is None or chk.target_type in _WEB_CHECK_EXCLUDE:
         return back("Pick a valid check type.", 400)
-    plan = models.effective_plan(user)
-    if chk.tier == "pro" and plan != "pro":
-        return back(f"The '{chk.name}' check requires a Pro plan.", 403)
     if not target:
         return back("Enter a target to check.", 400)
-    if plan != "pro" and scan_store.count_this_month(user["id"]) >= FREE_MONTHLY_QUOTA:
-        return back(f"Free plan limit reached ({FREE_MONTHLY_QUOTA} scans/month). Upgrade to Pro for unlimited.", 429)
 
     result = chk.run(target)
-    models.increment_scan_count(user["id"])
-
     order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     findings = sorted(result.findings, key=lambda f: order.get(f.severity, 9))
     counts = {s: sum(1 for f in result.findings if f.severity == s) for s in order}
-    scan_store.add_scan(user["id"], f"check:{check_id}", target, counts, len(result.findings))
+    scan_store.add_scan("admin", f"check:{check_id}", target, counts, len(result.findings))
 
     return render_template("check.html", checks=checks, result=result, findings=findings,
-                           counts=counts, selected=check_id, target=target, token=token,
-                           check_name=chk.name)
+                           counts=counts, selected=check_id, target=target, check_name=chk.name)
 
 
-@bp.route("/history", methods=["GET", "POST"])
+@bp.route("/history")
+@login_required
 def history():
-    """Per-user scan history — gated by the user's own access token."""
-    token = (request.values.get("token") or "").strip()
-    if not token:
-        return render_template("history.html")
-    user = models.get_user_by_token(token)
-    if not user:
-        return render_template("history.html", error="Invalid access token.", token=token), 403
-    return render_template("history.html", token=token, user=user,
-                           scans=scan_store.list_for_user(user["id"]),
-                           quota=FREE_MONTHLY_QUOTA,
-                           used=scan_store.count_this_month(user["id"]))
+    """Scan history (every repo scan and check that has been run)."""
+    return render_template("history.html", scans=scan_store.recent(200))
 
 
 # How many new public repos to pull and scan per fetch. Human-gated and bounded:
@@ -227,18 +192,18 @@ DISCLOSURE_DEFAULT_TARGET = 10
 DISCLOSURE_MAX_TARGET = 50
 DISCLOSURE_MAX_REPOS = 120
 
-_job = {"status": "idle", "scanned": 0, "found": 0, "queued": 0, "target": 0, "error": None}
+_job = {"status": "idle", "source": "github", "scanned": 0, "found": 0, "queued": 0, "target": 0, "error": None}
 _job_lock = threading.Lock()
 
 
-def _run_disclosure_job(target, token):
+def _run_disclosure_job(target, token, source="github"):
     page = 1
     try:
         while True:
             with _job_lock:
                 if _job["found"] >= target or _job["scanned"] >= DISCLOSURE_MAX_REPOS:
                     break
-            repos, error = fetch_recent_public_repos(limit=50, page=page)
+            repos, error = (SOURCES.get(source) or SOURCES["github"])(limit=50, page=page)
             if error:
                 with _job_lock:
                     _job["error"] = error
@@ -255,7 +220,7 @@ def _run_disclosure_job(target, token):
                 with _job_lock:
                     _job["scanned"] += 1
                 if findings:
-                    disclosure_store.add_case(repo["full_name"], repo["owner"], findings)
+                    disclosure_store.add_case(repo["full_name"], repo["owner"], findings, repo["url"])
                     with _job_lock:
                         _job["queued"] += 1
                         _job["found"] += len(findings)
@@ -297,12 +262,15 @@ def disclosure_fetch():
         except (TypeError, ValueError):
             target = DISCLOSURE_DEFAULT_TARGET
         target = max(1, min(target, DISCLOSURE_MAX_TARGET))
-        _job.update({"status": "running", "scanned": 0, "found": 0, "queued": 0,
-                     "target": target, "error": None})
+        source = request.form.get("source", "github")
+        if source not in SOURCES:
+            source = "github"
+        _job.update({"status": "running", "source": source, "scanned": 0, "found": 0,
+                     "queued": 0, "target": target, "error": None})
 
     token = os.environ.get("GITHUB_TOKEN")
-    threading.Thread(target=_run_disclosure_job, args=(target, token), daemon=True).start()
-    flash(f"Scanning new public repos until {target} findings…", "ok")
+    threading.Thread(target=_run_disclosure_job, args=(target, token, source), daemon=True).start()
+    flash(f"Scanning new public repos on {source} until {target} findings…", "ok")
     return redirect(url_for("main.disclosure"))
 
 

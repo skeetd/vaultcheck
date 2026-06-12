@@ -19,15 +19,18 @@ Flask dashboard or the CLI.
 `subdomains` (crt.sh), `tls` (deprecated protocols + cert), `cors`, `exposed-files`,
 `rdap` (domain age/registrar), `caa`, `package` (`name@version` → OSV), `cve` (NVD search).
 
-**Responsible disclosure** (`/disclosure`, admin) — scans newly-created public repos
-until N findings, in the background; you review each **masked** finding, then send a
-**private** notice to the owner. Secrets are never stored, shown, or used.
+**Responsible disclosure** (`/disclosure`, admin) — monitors newly-created public repos
+on **GitHub and GitLab**, scanning in the background until N findings. You review each
+**masked** finding — every one deep-links to the exact line at the source and shows the
+line with the secret masked, so you can rule out false positives without the raw secret
+ever being stored — then send a **private** notice to the owner.
 
 **Auto-fix PR** (`run.py fix <repo>`) — opens a GitHub PR bumping vulnerable
 dependencies on a new branch. Dry-run by default; `--apply` to open the PR.
 
-**Admin dashboard** (`/`) — manage users + access tokens, plans (free/pro),
-billing & plan expiry (auto-downgrade), per-user scan history, usage overview.
+**Admin dashboard** (`/`) — log in once and scan from the session (no tokens to paste).
+Manage users, plans (free/pro), billing & plan expiry (auto-downgrade), scan history and
+a usage overview.
 
 ## Quick start
 
@@ -72,13 +75,13 @@ they hold secrets and local data and never leave your machine.
 
 ## Dashboard usage
 
-1. Open `http://127.0.0.1:5050`, log in with `ADMIN_PASSWORD`.
-2. **Create a user** → they get an **access token** (shown in the table / user page).
-3. Hand the token to the user; they scan via `/scan` and `/check`, and see only
-   their own history at `/history`.
-4. Toggle **free/pro** or open a user to set **Pro until \<date\>** (auto-downgrades on expiry).
+1. Open `http://127.0.0.1:5050` and log in with `ADMIN_PASSWORD`.
+2. From the sidebar: **Scan** a repo, run a **Check**, browse **History**, or open
+   **Public repos** to monitor GitHub/GitLab for leaked secrets and notify owners.
+3. The **Dashboard** manages users and billing — toggle free/pro or open a user to set
+   **Pro until \<date\>** (auto-downgrades when it lapses).
 
-Free plan is limited to **20 scans/month**; pro is unlimited.
+Everything runs from your admin session — no access tokens to hand around.
 
 ## Project structure
 

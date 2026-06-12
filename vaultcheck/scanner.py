@@ -39,7 +39,8 @@ class ScanResult:
 
 
 def _is_github_url(target: str) -> bool:
-    return bool(re.match(r"https?://github\.com/", target))
+    # GitHub or GitLab — both are cloneable over https
+    return bool(re.match(r"https?://(?:github|gitlab)\.com/", target))
 
 
 def _clone(url: str, dest: Path, token: Optional[str] = None) -> bool:

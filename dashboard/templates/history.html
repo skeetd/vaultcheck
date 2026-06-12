@@ -1,25 +1,9 @@
 {% extends "base.html" %}
-{% block title %}VaultCheck — My scans{% endblock %}
-{% block wrapclass %}narrow{% endblock %}
+{% block title %}VaultCheck — History{% endblock %}
 {% block content %}
-  <h1>My scans</h1>
-  <div class="lead">Your scan history is private to your access token — only you can see it.</div>
+  <h1>Scan history</h1>
+  <div class="lead">Every repository scan and check you've run.</div>
 
-  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
-
-  <div class="card">
-    <form method="GET" action="/history">
-      <label>Access token</label>
-      <input class="mono" type="text" name="token" value="{{ token or '' }}" placeholder="your-access-token" required>
-      <button class="btn-primary" type="submit">Show my scans</button>
-    </form>
-  </div>
-
-  {% if user %}
-  <div class="lead" style="margin-bottom:14px">
-    {{ user.username }} · plan <span class="pill {{ user.plan }}">{{ user.plan|upper }}</span>
-    {% if user.plan != 'pro' %} · <b>{{ used }}/{{ quota }}</b> scans this month{% endif %}
-  </div>
   {% if scans %}
   <div class="table-wrap">
     <table>
@@ -41,6 +25,5 @@
   </div>
   {% else %}
   <p class="empty">No scans yet — run one from Scan or Checks.</p>
-  {% endif %}
   {% endif %}
 {% endblock %}

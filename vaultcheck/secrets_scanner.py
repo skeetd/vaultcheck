@@ -76,6 +76,7 @@ class SecretFinding:
     category: str
     severity: str
     matched_value: str
+    masked_context: str = ""   # the line with the secret masked — safe to display
 
 
 def _mask(value: str) -> str:
@@ -108,6 +109,7 @@ def scan_file(filepath: Path, root: Path) -> list[SecretFinding]:
         for pat in _COMPILED:
             m = pat["_re"].search(line)
             if m:
+                masked = _mask(m.group(0))
                 findings.append(SecretFinding(
                     file=rel,
                     line_number=lineno,
@@ -115,7 +117,8 @@ def scan_file(filepath: Path, root: Path) -> list[SecretFinding]:
                     secret_type=pat["name"],
                     category=pat["category"],
                     severity=pat["severity"],
-                    matched_value=_mask(m.group(0)),
+                    matched_value=masked,
+                    masked_context=line.strip().replace(m.group(0), masked)[:160],
                 ))
                 break  # one finding per line to avoid duplicates
     return findings

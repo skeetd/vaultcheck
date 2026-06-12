@@ -10,15 +10,11 @@
   <div class="card">
     <form method="POST" action="/scan">
       <label>GitHub repository URL</label>
-      <input class="mono" type="url" name="repo_url" placeholder="https://github.com/owner/repo" required>
-
-      <label>Access token</label>
-      <input class="mono" type="text" name="token" value="{{ token or '' }}" placeholder="your-access-token" required>
-
+      <input class="mono" type="url" name="repo_url" placeholder="https://github.com/owner/repo" required autofocus>
       <button class="btn-primary" type="submit">Scan repository</button>
     </form>
     <div class="note" style="margin-top:14px">
-      Free plan covers secrets &amp; code analysis; Pro adds dependency vulnerability scanning.
+      Scans for secrets, vulnerable dependencies and insecure code.
       Run only on repositories you own or are authorized to test.
     </div>
   </div>

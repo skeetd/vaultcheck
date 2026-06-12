@@ -32,6 +32,11 @@
 
   <div class="card fetchbar">
     <form method="POST" action="/disclosure/fetch">
+      <label>Source</label>
+      <select name="source" style="width:auto;margin:0">
+        <option value="github" {% if not job or job.source != 'gitlab' %}selected{% endif %}>GitHub</option>
+        <option value="gitlab" {% if job and job.source == 'gitlab' %}selected{% endif %}>GitLab</option>
+      </select>
       <label>Scan until</label>
       <input type="number" name="target" value="{{ job.target if job and job.target else 10 }}" min="1" max="50" style="width:78px;margin:0">
       <label>findings</label>
@@ -58,20 +63,19 @@
   {% if pending %}
     {% for case in pending %}
     <div class="card case">
-      <div class="repo"><a href="https://github.com/{{ case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a>
+      <div class="repo"><a href="{{ case.repo_url or 'https://github.com/' + case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a>
         <span class="owner">· owner @{{ case.owner }}</span></div>
       <div class="table-wrap" style="margin:10px 0">
         <table>
-          <thead><tr><th>Kind</th><th>Type</th><th>Severity</th><th>File</th><th>Line</th><th>Detail</th></tr></thead>
+          <thead><tr><th>Kind</th><th>Type</th><th>Severity</th><th>Location</th><th>Context (masked)</th></tr></thead>
           <tbody>
             {% for f in case.findings %}
             <tr>
               <td>{{ f.kind or 'Secret' }}</td>
               <td>{{ f.type or f.secret_type }}</td>
               <td><span class="pill sev-{{ (f.severity or 'low')|lower }}">{{ f.severity or '—' }}</span></td>
-              <td class="mono">{{ f.file }}</td>
-              <td>{{ f.line }}</td>
-              <td class="mono">{{ f.detail or f.masked_value }}</td>
+              <td class="mono">{% if f.url %}<a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.file }}:{{ f.line }}</a>{% else %}{{ f.file }}:{{ f.line }}{% endif %}</td>
+              <td class="mono" style="overflow-wrap:anywhere">{{ f.context or f.detail or f.masked_value }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -93,7 +97,7 @@
   {% if approved %}
     {% for case in approved %}
     <div class="card case">
-      <div class="repo"><a href="https://github.com/{{ case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a>
+      <div class="repo"><a href="{{ case.repo_url or 'https://github.com/' + case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a>
         <span class="owner">· owner @{{ case.owner }}</span></div>
       <div class="notice-label">Send this privately to the owner, then mark disclosed</div>
       <textarea class="notice" readonly>{{ case.notice }}</textarea>

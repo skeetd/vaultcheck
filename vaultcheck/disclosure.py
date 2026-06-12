@@ -67,6 +67,53 @@ def fetch_recent_public_repos(limit: int = 50, since_minutes: int = 720, page: i
     return repos, None
 
 
+GITLAB_PROJECTS = "https://gitlab.com/api/v4/projects"
+
+
+def fetch_recent_gitlab_projects(limit: int = 50, since_minutes: int = 720, page: int = 1):
+    """Recently-created public GitLab projects (no auth needed; rate-limited)."""
+    query = urllib.parse.urlencode({
+        "order_by": "created_at",
+        "sort": "desc",
+        "visibility": "public",
+        "per_page": min(max(limit, 1), 100),
+        "page": max(page, 1),
+    })
+    req = urllib.request.Request(f"{GITLAB_PROJECTS}?{query}",
+                                 headers={"User-Agent": "vaultcheck-disclosure"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:  # noqa: BLE001
+        return [], str(exc)
+
+    repos = []
+    for item in data[:limit]:
+        repos.append({
+            "full_name": item.get("path_with_namespace", item.get("name", "")),
+            "url": item.get("web_url", ""),
+            "owner": (item.get("namespace") or {}).get("path", ""),
+        })
+    return repos, None
+
+
+# Sources the disclosure worker can monitor. Add a fetcher here to support more.
+SOURCES = {
+    "github": fetch_recent_public_repos,
+    "gitlab": fetch_recent_gitlab_projects,
+}
+
+
+def _blob_url(repo_url: str, file: str, line: int) -> str:
+    """Deep-link to the exact file+line at the source, so a reviewer can verify."""
+    base = (repo_url or "").rstrip("/")
+    if not base:
+        return ""
+    if "gitlab.com" in base:
+        return f"{base}/-/blob/HEAD/{file}#L{line}"
+    return f"{base}/blob/HEAD/{file}#L{line}"
+
+
 def fingerprint(repo_full_name: str, secret_type: str, file: str, line: int) -> str:
     """Stable dedupe key for a finding — derived from LOCATION, not the secret."""
     raw = f"{repo_full_name}|{secret_type}|{file}|{line}"
@@ -85,10 +132,12 @@ def scan_repo(repo_url: str, token: Optional[str] = None):
     findings = []
     for f in result.secrets:
         findings.append({"kind": "Secret", "type": f.secret_type, "severity": f.severity,
-                         "file": f.file, "line": f.line_number, "detail": f.matched_value})
+                         "file": f.file, "line": f.line_number, "detail": f.matched_value,
+                         "context": f.masked_context, "url": _blob_url(repo_url, f.file, f.line_number)})
     for c in result.code:
         findings.append({"kind": "Code", "type": c.issue_type, "severity": c.severity,
-                         "file": c.file, "line": c.line_number, "detail": c.description})
+                         "file": c.file, "line": c.line_number, "detail": c.description,
+                         "context": c.line_content, "url": _blob_url(repo_url, c.file, c.line_number)})
     return findings, result.errors
 
 
