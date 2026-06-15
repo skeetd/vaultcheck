@@ -25,7 +25,8 @@ def _save(data: dict) -> None:
     SCANS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def add_scan(user_id: str, kind: str, target: str, counts: dict, total: int) -> dict:
+def add_scan(user_id: str, kind: str, target: str, counts: dict, total: int,
+             fingerprints: list = None) -> dict:
     data = _load()
     rec = {
         "id": str(uuid.uuid4()),
@@ -35,10 +36,20 @@ def add_scan(user_id: str, kind: str, target: str, counts: dict, total: int) -> 
         "created_at": _now(),
         "counts": counts,             # {CRITICAL, HIGH, MEDIUM, LOW}
         "total": total,
+        "fingerprints": fingerprints or [],  # stable IDs of findings, for diffing
     }
     data[rec["id"]] = rec
     _save(data)
     return rec
+
+
+def latest_for_target(target: str, kind: str = "repo") -> dict:
+    """Most recent scan record for a given target+kind, or None."""
+    matches = [r for r in _load().values()
+               if r.get("target") == target and r.get("kind") == kind]
+    if not matches:
+        return None
+    return max(matches, key=lambda r: r["created_at"])
 
 
 def list_for_user(user_id: str) -> list[dict]:

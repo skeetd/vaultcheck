@@ -132,10 +132,12 @@ def scan_repo(repo_url: str, token: Optional[str] = None):
     findings = []
     for f in result.secrets:
         findings.append({"kind": "Secret", "type": f.secret_type, "severity": f.severity,
+                         "category": f.category,
                          "file": f.file, "line": f.line_number, "detail": f.matched_value,
                          "context": f.masked_context, "url": _blob_url(repo_url, f.file, f.line_number)})
     for c in result.code:
         findings.append({"kind": "Code", "type": c.issue_type, "severity": c.severity,
+                         "category": c.category,
                          "file": c.file, "line": c.line_number, "detail": c.description,
                          "context": c.line_content, "url": _blob_url(repo_url, c.file, c.line_number)})
     return findings, result.errors

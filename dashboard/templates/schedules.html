@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — Scheduled scans{% endblock %}
+{% block content %}
+  <h1>Scheduled scans</h1>
+  <div class="lead">Re-run a repository scan or a check automatically on a schedule. Results land in your history.</div>
+
+  {% with messages = get_flashed_messages(with_categories=True) %}
+    {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+  {% endwith %}
+
+  {% if can_schedule %}
+  <div class="card">
+    <form method="POST" action="/schedules/add">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <label>What to scan</label>
+          <select name="kind" id="kind" onchange="upd()">
+            <option value="repo">Repository scan</option>
+            {% for c in checks %}<option value="check:{{ c.id }}" data-type="{{ c.target_type }}">Check · {{ c.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Interval</label>
+          <select name="interval">
+            {% for iv in intervals %}<option value="{{ iv }}" {% if iv == 'daily' %}selected{% endif %}>{{ iv|capitalize }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <label>Target</label>
+      <input class="mono" type="text" name="target" id="target" placeholder="https://github.com/owner/repo" required>
+      <button class="btn-primary" type="submit">Create schedule</button>
+    </form>
+  </div>
+  {% else %}
+  <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+    <div><b>Scheduled scans are a Pro feature.</b><div class="note">Upgrade to automate recurring scans of your repos and targets.</div></div>
+    <a class="btn btn-primary" href="/billing">Upgrade to Pro</a>
+  </div>
+  {% endif %}
+
+  <h2>Your schedules</h2>
+  {% if schedules %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>What</th><th>Target</th><th>Every</th><th>Next run</th><th>Last result</th><th></th></tr></thead>
+      <tbody>
+        {% for s in schedules %}
+        <tr>
+          <td>{{ 'Repository' if s.kind == 'repo' else s.kind.replace('check:','Check · ') }}</td>
+          <td class="mono" style="overflow-wrap:anywhere">{{ s.target }}</td>
+          <td>{{ s.interval }}</td>
+          <td style="color:var(--soft);white-space:nowrap">{{ s.next_run[:16].replace('T',' ') if s.next_run else '—' }}</td>
+          <td>
+            {% if s.last_result %}
+              {% set c = s.last_result.counts %}
+              {% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}{% if c[sev] %}<span class="pill sev-{{ sev|lower }}">{{ c[sev] }}</span> {% endif %}{% endfor %}
+              {% if not s.last_result.total %}<span class="note">clean</span>{% endif %}
+            {% else %}<span class="note">not yet run</span>{% endif %}
+          </td>
+          <td><form method="POST" action="/schedules/{{ s.id }}/delete" onsubmit="return confirm('Remove this schedule?')"><button class="btn btn-danger" type="submit">Remove</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No schedules yet.</p>
+  {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  function upd(){
+    var s=document.getElementById('kind');if(!s)return;
+    var o=s.options[s.selectedIndex];var t=o.getAttribute('data-type');
+    var ph={url:'https://example.com',domain:'example.com',email:'you@example.com',package:'flask@0.12.2',keyword:'openssl'}[t]||'https://github.com/owner/repo';
+    document.getElementById('target').placeholder=ph;
+  }
+  upd();
+</script>
+{% endblock %}

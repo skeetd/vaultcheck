@@ -1,0 +1,16 @@
+# VaultCheck scans its own source, which contains the very patterns it looks for
+# (regex strings like "eval(", "os.system(", "document.write(", raw-SQL examples).
+# These are pattern *definitions*, not vulnerable code, so they are ignored here.
+# Test fixtures and the bundled vulnerable demo are ignored by the built-in defaults.
+
+vaultcheck/code_scanner.py
+vaultcheck/deps_scanner.py
+
+# Test files that embed intentional attack patterns (RCE, deserialization, JWT
+# 'none', disabled TLS) as scanner inputs — not real vulnerabilities.
+tests/test_code_critical.py
+tests/test_llm_explain.py
+
+# checks.py uses SHA-1 only for a non-security TLS cert fingerprint; run.py's
+# "hardcoded IP" is the dashboard's 127.0.0.1 default. Keep these visible by NOT
+# ignoring them — they are intentionally left in so reviewers can see them.

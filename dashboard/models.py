@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from werkzeug.security import check_password_hash, generate_password_hash
+
 USERS_FILE = Path(__file__).parent / "users.json"
 
 
@@ -43,20 +45,53 @@ def get_user_by_token(token: str) -> Optional[dict]:
     return None
 
 
-def create_user(username: str, email: str, plan: str = "free") -> dict:
+def create_user(username: str, email: str, plan: str = "free",
+                password: Optional[str] = None) -> dict:
     data = _load()
     user = {
-        "id":         str(uuid.uuid4()),
-        "username":   username,
-        "email":      email,
-        "plan":       plan,
-        "api_token":  secrets.token_urlsafe(24),
-        "created_at": datetime.utcnow().isoformat(),
-        "scan_count": 0,
+        "id":            str(uuid.uuid4()),
+        "username":      username,
+        "email":         email,
+        "plan":          plan,
+        "api_token":     secrets.token_urlsafe(24),
+        "password_hash": generate_password_hash(password) if password else None,
+        "created_at":    datetime.utcnow().isoformat(),
+        "scan_count":    0,
     }
     data[user["id"]] = user
     _save(data)
     return user
+
+
+def create_account(username: str, email: str, password: str) -> tuple[Optional[dict], Optional[str]]:
+    """Self-serve signup. Returns (user, error). New accounts start on the free plan."""
+    username, email = username.strip(), email.strip()
+    if not username or not email or not password:
+        return None, "Username, email and password are all required."
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return None, "Enter a valid email address."
+    if len(password) < 8:
+        return None, "Password must be at least 8 characters."
+    if get_user_by_email(email):
+        return None, "An account with that email already exists."
+    return create_user(username, email, plan="free", password=password), None
+
+
+def authenticate(email: str, password: str) -> Optional[dict]:
+    """Return the user if email + password match an account with a password set."""
+    user = get_user_by_email(email)
+    if user and user.get("password_hash") and check_password_hash(user["password_hash"], password):
+        return user
+    return None
+
+
+def set_password(user_id: str, password: str) -> bool:
+    data = _load()
+    if user_id not in data:
+        return False
+    data[user_id]["password_hash"] = generate_password_hash(password)
+    _save(data)
+    return True
 
 
 def update_plan(user_id: str, plan: str) -> Optional[dict]:

@@ -1,9 +1,56 @@
 {% extends "base.html" %}
 {% block title %}VaultCheck — Security checks{% endblock %}
 {% block wrapclass %}narrow{% endblock %}
+{% block extra_css %}
+<style>
+  .runrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .runrow .btn{margin:0}
+  .or{color:var(--muted);font-size:12px}
+
+  /* Aggregate "run all" results — tidy, categorized, collapsible (like Public repos) */
+  .agg{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .agg .t{font-size:14px;font-weight:600}
+  .agg .nums{display:flex;gap:6px;flex-wrap:wrap}
+  .filterbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:6px 0 14px}
+  .fpill{font-size:12px;font-weight:600;padding:5px 11px;border-radius:5px;border:1px solid var(--border);
+         background:var(--card);color:var(--soft);cursor:pointer;user-select:none}
+  .fpill:hover{border-color:var(--accent)}
+  .fpill.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .fpill .n{opacity:.65;font-weight:500;margin-left:3px}
+
+  details.ck{background:var(--card);border:1px solid var(--border);border-left-width:3px;border-radius:6px;margin-bottom:9px;overflow:hidden}
+  details.ck[open]{box-shadow:0 1px 3px rgba(20,24,33,.06)}
+  details.ck[data-sev="CRITICAL"]{border-left-color:var(--crit)}
+  details.ck[data-sev="HIGH"]{border-left-color:var(--high)}
+  details.ck[data-sev="MEDIUM"]{border-left-color:var(--med)}
+  details.ck[data-sev="LOW"]{border-left-color:var(--low)}
+  details.ck[data-sev="CLEAN"]{border-left-color:var(--green)}
+  details.ck[data-sev="ERROR"]{border-left-color:var(--muted)}
+  details.ck > summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:11px;padding:12px 15px}
+  details.ck > summary::-webkit-details-marker{display:none}
+  summary .cname{font-weight:600;font-size:13.5px}
+  summary .ccat{color:var(--soft);font-size:12px}
+  summary .mini{color:var(--soft);font-size:12px;white-space:nowrap;margin-left:auto}
+  summary .chev{color:var(--muted);flex-shrink:0;transition:transform .15s}
+  details.ck[open] > summary .chev{transform:rotate(90deg)}
+  .ck-body{padding:8px 15px 14px;border-top:1px solid var(--border)}
+  .pill.ck-clean{color:var(--green);background:var(--green-bg)}
+  .pill.ck-err{color:var(--soft);background:var(--low-bg)}
+  .finding{border-top:1px solid var(--border);padding:11px 0;display:flex;gap:12px;align-items:flex-start}
+  .finding:first-child{border-top:none}
+  .finding .ft{font-weight:600}
+</style>
+{% endblock %}
 {% block content %}
   <h1>Security checks</h1>
-  <div class="lead">Run a check against a target. Scanning a repository? Use <a href="/scan">Scan</a>.</div>
+  <div class="lead">Run one check, or <b>run all passive checks at once</b> against a domain or URL. Scanning a repository? Use <a href="/scan">Scan</a>.</div>
+
+  {% if remaining is not none %}
+  <div class="flash {{ 'error' if remaining == 0 else 'ok' }}" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <span>{% if remaining == 0 %}You've used all your free scans this month.{% else %}<b>{{ remaining }}</b> free scan{{ 's' if remaining != 1 else '' }} left this month.{% endif %}</span>
+    <a href="/billing" style="font-weight:600">Upgrade to Pro →</a>
+  </div>
+  {% endif %}
 
   {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
 
@@ -21,11 +68,67 @@
       <label>Target</label>
       <input class="mono" type="text" name="target" id="target" value="{{ target or '' }}" required>
 
-      <button class="btn-primary" type="submit">Run check</button>
+      <div class="runrow">
+        <button class="btn-primary" type="submit" name="action" value="one">Run check</button>
+        <span class="or">or</span>
+        <button class="btn" type="submit" name="action" value="all">Run all checks</button>
+      </div>
     </form>
-    <div class="warn" style="margin-top:12px">Run checks against assets you own or are authorized to test.</div>
+    <div class="warn" style="margin-top:12px"><b>Run all checks</b> runs every passive check that fits your target (domain or URL) in one go. Active probes (e.g. exposed files) stay manual — run those only against assets you own.</div>
   </div>
 
+  {# ── Aggregate "run all" results ─────────────────────────────── #}
+  {% if all_cards is defined and all_cards %}
+  <div class="agg">
+    <div class="t">Ran {{ all_cards|length }} check{{ 's' if all_cards|length != 1 else '' }} against <span class="mono">{{ target }}</span></div>
+    <div class="nums">
+      {% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}{% if agg[sev] %}<span class="pill sev-{{ sev|lower }}">{{ agg[sev] }} {{ sev|lower }}</span>{% endif %}{% endfor %}
+      {% if not total %}<span class="pill ck-clean">All clear</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="filterbar" id="ckfilter">
+    <span class="fpill active" data-filter="ALL" onclick="ckFilter(this)">All <span class="n">{{ all_cards|length }}</span></span>
+    {% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}{% if buckets[sev] %}
+    <span class="fpill" data-filter="{{ sev }}" onclick="ckFilter(this)">{{ sev|capitalize }} <span class="n">{{ buckets[sev] }}</span></span>
+    {% endif %}{% endfor %}
+    {% if buckets['CLEAN'] %}<span class="fpill" data-filter="CLEAN" onclick="ckFilter(this)">Clean <span class="n">{{ buckets['CLEAN'] }}</span></span>{% endif %}
+    {% if buckets['ERROR'] %}<span class="fpill" data-filter="ERROR" onclick="ckFilter(this)">Unavailable <span class="n">{{ buckets['ERROR'] }}</span></span>{% endif %}
+  </div>
+
+  <div id="ck-list">
+  {% for card in all_cards %}
+    <details class="ck" data-sev="{{ card.worst }}" {% if card.worst in ['CRITICAL','HIGH'] %}open{% endif %}>
+      <summary>
+        {% if card.worst in ['CRITICAL','HIGH','MEDIUM','LOW'] %}<span class="pill sev-{{ card.worst|lower }}">{{ card.worst }}</span>
+        {% elif card.worst == 'CLEAN' %}<span class="pill ck-clean">CLEAN</span>
+        {% else %}<span class="pill ck-err">ERROR</span>{% endif %}
+        <span class="cname">{{ card.check.name }}</span>
+        <span class="ccat">{{ card.check.category }}</span>
+        <span class="mini">{% if card.worst == 'ERROR' %}unavailable{% elif card.findings %}{{ card.findings|length }} finding{{ 's' if card.findings|length != 1 else '' }}{% else %}clean{% endif %}</span>
+        <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="ck-body">
+        {% if card.result.summary %}<div class="note" style="margin:8px 0 4px">{{ card.result.summary }}</div>{% endif %}
+        {% if card.result.errors %}{% for e in card.result.errors %}<div class="flash error" style="margin:8px 0 0">{{ e }}</div>{% endfor %}{% endif %}
+        {% if card.findings %}
+          {% for f in card.findings %}
+          <div class="finding">
+            <span class="pill sev-{{ f.severity|lower }}">{{ f.severity }}</span>
+            <div><div class="ft">{{ f.title }}</div>{% if f.detail %}<div class="note" style="margin-top:2px">{{ f.detail }}</div>{% endif %}</div>
+          </div>
+          {% endfor %}
+        {% elif not card.result.errors %}
+          <div class="flash ok" style="margin:8px 0 0">No issues found.</div>
+        {% endif %}
+      </div>
+    </details>
+  {% endfor %}
+  </div>
+  <p class="note" id="ck-empty" style="display:none">No checks in this category.</p>
+  {% endif %}
+
+  {# ── Single check result ─────────────────────────────────────── #}
   {% if result is defined and result %}
   <div class="card">
     <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -41,10 +144,10 @@
         {% endfor %}
       </div>
       {% for f in findings %}
-      <div style="border-top:1px solid #eef0f3;padding:12px 0;display:flex;gap:12px;align-items:flex-start">
+      <div class="finding">
         <span class="pill sev-{{ f.severity|lower }}">{{ f.severity }}</span>
         <div>
-          <div style="font-weight:600">{{ f.title }}</div>
+          <div class="ft">{{ f.title }}</div>
           {% if f.detail %}<div class="note" style="margin-top:2px">{{ f.detail }}</div>{% endif %}
         </div>
       </div>
@@ -67,5 +170,15 @@
     document.getElementById('target').placeholder = ph;
   }
   upd();
+
+  function ckFilter(el){
+    var sev=el.getAttribute('data-filter'), shown=0;
+    document.querySelectorAll('#ckfilter .fpill').forEach(function(p){p.classList.toggle('active',p===el);});
+    document.querySelectorAll('#ck-list details.ck').forEach(function(d){
+      var match=(sev==='ALL'||d.getAttribute('data-sev')===sev);
+      d.style.display=match?'':'none'; if(match) shown++;
+    });
+    var e=document.getElementById('ck-empty'); if(e) e.style.display=shown?'none':'block';
+  }
 </script>
 {% endblock %}

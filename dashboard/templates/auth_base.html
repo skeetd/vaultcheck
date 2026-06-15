@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<title>{% block title %}VaultCheck{% endblock %}</title>
+<style>
+  :root{
+    --card:#fff;--border:#d6dae1;--border-2:#c3cad4;--text:#13202f;--soft:#4f5a69;--muted:#7e8896;
+    --accent:#2b4ba8;--accent-deep:#1f3a86;--accent-soft:#e9eef8;
+    --crit:#b42318;--crit-bg:#fcecea;--green:#067647;--green-bg:#e6f4ec;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SF Mono","Cascadia Code","JetBrains Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--sans);color:var(--text);font-size:13.5px;-webkit-font-smoothing:antialiased;min-height:100vh;display:flex}
+  .promo{flex:1;background:#0c1422;color:#fff;padding:52px 50px;display:flex;flex-direction:column;justify-content:space-between;min-width:0;border-right:3px solid var(--accent)}
+  .promo .brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:17px;letter-spacing:.2px}
+  .promo .brand small{display:block;font-size:9.5px;letter-spacing:1.6px;color:#5e6b85;font-weight:600;margin-top:1px}
+  .promo h1{font-size:29px;line-height:1.2;letter-spacing:-.5px;font-weight:680;margin:0 0 14px;max-width:430px}
+  .promo p{color:#aab2c4;font-size:14.5px;line-height:1.6;max-width:420px}
+  .promo ul{list-style:none;margin:26px 0 0;display:flex;flex-direction:column;gap:13px}
+  .promo li{display:flex;align-items:center;gap:11px;color:#cdd3df;font-size:13.5px}
+  .promo li svg{flex-shrink:0;color:#5e7fd0}
+  .promo .foot{color:#5e6b85;font-size:12px;letter-spacing:.2px}
+  .pane{width:460px;max-width:100%;background:#eef0f3;display:flex;align-items:center;justify-content:center;padding:40px 28px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:32px;width:372px;max-width:100%}
+  .card h2{font-size:19px;font-weight:680;letter-spacing:-.2px;margin-bottom:4px}
+  .card .sub{color:var(--soft);font-size:13px;margin-bottom:22px}
+  label{display:block;font-size:11px;font-weight:600;color:var(--soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px}
+  input{width:100%;padding:10px 12px;border:1px solid var(--border-2);border-radius:5px;font-size:13.5px;color:var(--text);margin-bottom:14px;font-family:var(--sans)}
+  input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  button{width:100%;margin-top:4px;padding:11px;border:none;border-radius:5px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+  button:hover{background:var(--accent-deep)}
+  .msg{border-radius:5px;padding:10px 13px;margin-bottom:16px;font-size:12.5px;border:1px solid transparent}
+  .msg.error{background:var(--crit-bg);border-color:#e9c2c4;color:var(--crit)}
+  .msg.ok{background:var(--green-bg);border-color:#bfe3cc;color:var(--green)}
+  .alt{text-align:center;color:var(--soft);font-size:12.5px;margin-top:18px}
+  .alt a{color:var(--accent);font-weight:600;text-decoration:none}
+  .alt a:hover{text-decoration:underline}
+  .hint{font-size:11.5px;color:var(--muted);margin:-10px 0 14px}
+  @media (max-width:880px){.promo{display:none}.pane{flex:1;width:auto}}
+</style>
+</head>
+<body>
+  <section class="promo">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2.5l7.5 2.8v5.6c0 4.7-3.2 8-7.5 9.4-4.3-1.4-7.5-4.7-7.5-9.4V5.3L12 2.5z" fill="#3a5fc4"/>
+        <path d="M8.6 12.1l2.3 2.3 4.5-4.6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>VaultCheck<small>SECURITY CONSOLE</small></span>
+    </div>
+    <div>
+      <h1>Find exposed secrets before they reach production.</h1>
+      <p>Continuous scanning for hardcoded credentials, vulnerable dependencies and insecure code, with 15 network and domain checks — in one console.</p>
+      <ul>
+        <li><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 24+ secret patterns, masked by default</li>
+        <li><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Dependency CVEs across 7 ecosystems</li>
+        <li><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Git-history scanning and auto-fix PRs</li>
+      </ul>
+    </div>
+    <div class="foot">VaultCheck · Developer security platform</div>
+  </section>
+  <section class="pane">
+    <div class="card">
+      {% block card %}{% endblock %}
+    </div>
+  </section>
+</body>
+</html>

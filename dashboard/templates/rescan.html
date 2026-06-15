@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — Re-scan results{% endblock %}
+{% block wrapclass %}narrow{% endblock %}
+{% block content %}
+  <h1>Re-scan results</h1>
+  <div class="lead mono">{{ repo_url }}</div>
+
+  {% if not summary.baseline_existed %}
+    <div class="flash">No previous scan found — this run is now the baseline. Re-scan later to see changes.</div>
+  {% endif %}
+
+  <div class="card">
+    <div class="note">Severity counts (this scan)</div>
+    <p>
+      <b>CRITICAL</b> {{ summary.counts.CRITICAL }} &nbsp;·&nbsp;
+      <b>HIGH</b> {{ summary.counts.HIGH }} &nbsp;·&nbsp;
+      <b>MEDIUM</b> {{ summary.counts.MEDIUM }} &nbsp;·&nbsp;
+      <b>LOW</b> {{ summary.counts.LOW }} &nbsp;·&nbsp;
+      <b>TOTAL</b> {{ summary.total }}
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="note">Changes since last scan</div>
+    <p>
+      <b style="color:#b91c1c">{{ summary.diff.new }} new</b> &nbsp;·&nbsp;
+      <b style="color:#16a34a">{{ summary.diff.fixed }} fixed</b> &nbsp;·&nbsp;
+      {{ summary.diff.unchanged }} unchanged
+    </p>
+
+    {% if summary.diff.new_items %}
+      <h3>New findings</h3>
+      <ul>
+        {% for n in summary.diff.new_items %}
+          <li><b>{{ n.severity }}</b> — {{ n.label }} <span class="note">({{ n.kind }})</span></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if summary.diff.fixed_items %}
+      <h3>Fixed since last scan</h3>
+      <ul>
+        {% for f in summary.diff.fixed_items %}
+          <li>{{ f.label }} <span class="note">({{ f.kind }})</span></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+
+  {% if summary.notified %}
+    <div class="card">
+      <div class="note">Notifications</div>
+      <ul>
+        {% for r in summary.notified %}
+          <li>{{ r.sink }}: {% if r.ok %}sent{% else %}failed — {{ r.detail }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <p><a href="/scan">← Back to scan</a></p>
+{% endblock %}

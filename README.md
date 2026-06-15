@@ -9,15 +9,32 @@ Flask dashboard or the CLI.
 ## Features
 
 **Repository scan** (`/scan`, `run.py scan`)
-- **Secrets** — 24+ patterns (AWS, GitHub, Stripe, Slack, DB strings, private keys, JWTs, passwords…), masked at detection
+- **Secrets** — 55+ patterns (AWS, GitHub, GitLab, Stripe, Slack, Anthropic, OpenAI & other LLM providers, Discord/Telegram, npm/PyPI, cloud & SaaS tokens, DB strings, private keys, JWTs, passwords…), masked at detection
 - **Vulnerable dependencies** — OSV lookup with real CVSS v3 scoring across 7 ecosystems (`requirements.txt`, `package.json`, `go.mod`, `Gemfile.lock`, `composer.lock`, `Cargo.lock`, `poetry.lock`), with a per-finding upgrade command
-- **Insecure code** — SQLi, XSS, command injection, weak crypto, risky config
-- Clean, light, self-contained HTML report
+- **Insecure code** — SQLi, XSS, command injection, **RCE & unsafe deserialization** (pickle, `yaml.load`, `unserialize`, `readObject`, `Marshal.load`…), **disabled TLS verification** (across Python/Node/Go), **JWT `none` algorithm**, weak crypto, risky config, plus **Dockerfile**, **Terraform/docker-compose (IaC)**, **GitHub Actions workflow** checks and **.gitignore hygiene**
+- **Git history** (opt-in `--phase git_history`) — scans past commits for secrets even after they were removed from HEAD
+- **Dependency licenses** (opt-in `--phase licenses`) — flags copyleft (GPL/AGPL/LGPL/MPL) or unknown licenses via deps.dev
+- Clean, light, self-contained HTML report — every finding comes with a plain-language **impact ("what can happen") and how-to-secure** explanation; add `--pdf` for a PDF, `--sbom cyclonedx|spdx` for an SBOM
+- **Severity filter** — `--severity critical` (repeatable, e.g. `--severity high --severity medium`) reports only the levels you choose; also available as checkboxes on the dashboard `/scan` form
+- **CI gating** — `--fail-on critical|high|medium|low|any|never` sets the exit code for pipelines
 
-**Security checks** (`/check`, `run.py check run <id> <target>`) — 15 in a unified registry:
+**Security checks** (`/check`, `run.py check run <id> <target>`) — 19 in a unified registry:
 `repo`, `website`, `dns`, `security-txt`, `typosquat`, `breach`, `pwned-password`,
-`subdomains` (crt.sh), `tls` (deprecated protocols + cert), `cors`, `exposed-files`,
-`rdap` (domain age/registrar), `caa`, `package` (`name@version` → OSV), `cve` (NVD search).
+`subdomains` (crt.sh), `tls` (deprecated protocols + cert), `cors`, `https-redirect`
+(HSTS/preload), `cookies` (Secure/HttpOnly/SameSite), `mixed-content`, `exposed-files`,
+`open-redirect`, `rdap` (domain age/registrar), `caa`, `package` (`name@version` → OSV),
+`cve` (NVD search).
+
+**SBOM export** (`run.py sbom <path>`) — CycloneDX 1.5 or SPDX 2.3 JSON from the declared
+dependencies (metadata-only, no network).
+
+**Scheduled re-scan & change detection** (`run.py rescan <repo>`, `/rescan`) — re-scans a
+repo, diffs against the last stored scan, and reports what is **new** or **fixed**. Pair
+with cron / a CI cron job for continuous monitoring.
+
+**Notifications** (`run.py notify-test`) — Slack incoming webhooks and generic JSON webhooks,
+configured via `VAULTCHECK_SLACK_WEBHOOK` / `VAULTCHECK_WEBHOOK_URL`. `rescan` sends a change
+report only when findings actually changed.
 
 **Responsible disclosure** (`/disclosure`, admin) — monitors newly-created public repos
 on **GitHub and GitLab**, scanning in the background until N findings. You review each
@@ -31,6 +48,11 @@ dependencies on a new branch. Dry-run by default; `--apply` to open the PR.
 **Admin dashboard** (`/`) — log in once and scan from the session (no tokens to paste).
 Manage users, plans (free/pro), billing & plan expiry (auto-downgrade), scan history and
 a usage overview.
+
+> **Network note:** the license check calls `api.deps.dev`. If you run VaultCheck behind an
+> egress allowlist, add that domain (alongside `api.osv.dev`, `crt.sh`, `api.github.com`,
+> the NVD and HIBP endpoints).
+
 
 ## Quick start
 

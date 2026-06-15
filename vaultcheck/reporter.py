@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from . import __version__
+from .explanations import explain
 from .scanner import ALL_PHASES, ScanResult
 
 _SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
@@ -42,11 +43,40 @@ def _table(findings: list, columns: list[tuple]) -> str:
     )
 
 
+def _guidance(categories: list) -> str:
+    """Render an expandable 'what these mean & how to fix' block for the distinct
+    finding categories present in a section."""
+    seen: list = []
+    for c in categories:
+        if c and c not in seen:
+            seen.append(c)
+    if not seen:
+        return ""
+    rows = ""
+    for c in seen:
+        impact, fix = explain(c)
+        rows += (
+            '<div class="exp">'
+            f'<div class="exp-cat">{_esc(c)}</div>'
+            f'<div class="exp-row"><span class="exp-k">Impact</span><span>{_esc(impact)}</span></div>'
+            f'<div class="exp-row"><span class="exp-k">How to secure</span><span>{_esc(fix)}</span></div>'
+            "</div>"
+        )
+    return ('<details class="guidance"><summary>What these mean &amp; how to secure</summary>'
+            f'<div class="guidance-body">{rows}</div></details>')
+
+
 def generate_report(result: ScanResult, output_path: Optional[Path] = None,
-                    upgrade_hint: Optional[str] = None) -> str:
+                    upgrade_hint: Optional[str] = None,
+                    severity_filter: Optional[list] = None,
+                    ai_section: Optional[str] = None) -> str:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     counts = result.severity_counts
     total = result.total
+    filter_note = ""
+    if severity_filter:
+        filter_note = (" &nbsp;·&nbsp; filtered to "
+                       + ", ".join(s.upper() for s in severity_filter))
 
     # Severity stat cards
     cards = ""
@@ -84,6 +114,10 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
         f"{_count('dependencies', len(result.deps), 'deps')} &nbsp;·&nbsp; "
         f"{_count('code issues', len(result.code), 'code')}"
     )
+    if "git_history" in ran:
+        breakdown += f" &nbsp;·&nbsp; {len(result.git_history)} in git history"
+    if "licenses" in ran:
+        breakdown += f" &nbsp;·&nbsp; {len(result.licenses)} license issues"
 
     secrets_html = _table(result.secrets, [
         ("Severity", lambda f: f.severity, "sev"),
@@ -107,6 +141,46 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
         ("Detail",   lambda f: f.description, "text"),
     ]) if "code" in ran else _skipped()
 
+    # Per-section "impact & how to secure" guidance (only when there are findings)
+    secrets_guidance = _guidance([f.category for f in result.secrets]) if ("secrets" in ran and result.secrets) else ""
+    deps_guidance = _guidance(["dep"]) if ("deps" in ran and result.deps) else ""
+    code_guidance = _guidance([f.category for f in result.code]) if ("code" in ran and result.code) else ""
+
+    history_section = ""
+    if "git_history" in ran:
+        history_html = _table(result.git_history, [
+            ("Severity", lambda f: f.severity, "sev"),
+            ("Type",     lambda f: f.secret_type, "text"),
+            ("Commit",   lambda f: f.commit or "—", "mono"),
+            ("File",     lambda f: f.file, "mono"),
+            ("Line",     lambda f: str(f.line_number), "mono"),
+            ("Value",    lambda f: f.matched_value, "mono"),
+        ])
+        history_section = f"""
+  <section>
+    <h2>Git history</h2>
+    <div class="section-sub">Secrets that were committed in the past and later removed — still recoverable from history. Rotate any that were ever real.</div>
+    {history_html}
+    {_guidance([f.category for f in result.git_history])}
+  </section>"""
+
+    licenses_section = ""
+    if "licenses" in ran:
+        licenses_html = _table(result.licenses, [
+            ("Severity", lambda f: f.severity, "sev"),
+            ("Package",  lambda f: f"{f.package}@{f.version}", "mono"),
+            ("License",  lambda f: f.license, "mono"),
+            ("File",     lambda f: f.file, "mono"),
+            ("Note",     lambda f: f.reason, "text"),
+        ])
+        licenses_section = f"""
+  <section>
+    <h2>Dependency licenses</h2>
+    <div class="section-sub">Copyleft or unknown licenses among dependencies — review for compliance with your product's licensing.</div>
+    {licenses_html}
+    {_guidance(["license"]) if result.licenses else ""}
+  </section>"""
+
     errors_html = ""
     if result.errors:
         items = "".join(f"<li>{_esc(e)}</li>" for e in result.errors)
@@ -120,19 +194,22 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
 <title>VaultCheck Report — {_esc(result.target)}</title>
 <style>
   :root {{
-    --bg:        #eef1f4;
+    --bg:        #e9ebef;
     --card:      #ffffff;
-    --border:    #dce1e7;
-    --text:      #1f2933;
-    --text-soft: #67727e;
-    --crit:      #b3261e;
-    --crit-bg:   #fdeae8;
-    --high:      #b35309;
-    --high-bg:   #fcefe0;
-    --med:       #846a00;
-    --med-bg:    #fbf4d6;
-    --low:       #5a6772;
-    --low-bg:    #eceff2;
+    --surface-2: #f5f6f8;
+    --border:    #d6dae1;
+    --text:      #13202f;
+    --text-soft: #4f5a69;
+    --accent:    #2b4ba8;
+    --brand:     #0c1422;
+    --crit:      #b42318;
+    --crit-bg:   #fcecea;
+    --high:      #b54708;
+    --high-bg:   #fceee1;
+    --med:       #8a6510;
+    --med-bg:    #faf2d6;
+    --low:       #475467;
+    --low-bg:    #edeff2;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
   }}
@@ -149,8 +226,8 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
 
   /* Header */
   header {{ margin-bottom: 28px; }}
-  .title {{ font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }}
-  .title .vc {{ color: var(--text); }}
+  .title {{ font-size: 21px; font-weight: 680; letter-spacing: -0.3px; }}
+  .title .vc {{ color: var(--accent); }}
   .subtitle {{ color: var(--text-soft); font-size: 13px; margin-top: 4px; }}
   .subtitle code {{ font-family: var(--mono); color: var(--text); }}
 
@@ -158,10 +235,9 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
   .summary {{
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 7px;
     padding: 22px 24px;
     margin-bottom: 32px;
-    box-shadow: 0 1px 2px rgba(16,24,40,0.04);
   }}
   .summary-top {{ display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }}
   .total {{ font-size: 15px; }}
@@ -175,7 +251,7 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
 
   .stats {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }}
   @media (max-width: 560px) {{ .stats {{ grid-template-columns: repeat(2, 1fr); }} }}
-  .stat {{ border: 1px solid var(--border); border-top-width: 3px; border-radius: 8px; padding: 12px 14px; }}
+  .stat {{ border: 1px solid var(--border); border-top-width: 3px; border-radius: 6px; padding: 12px 14px; }}
   .stat-num {{ font-size: 26px; font-weight: 700; line-height: 1; }}
   .stat-label {{ font-size: 12px; color: var(--text-soft); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.4px; }}
   .stat-critical {{ border-top-color: var(--crit); }} .stat-critical .stat-num {{ color: var(--crit); }}
@@ -192,7 +268,7 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
   .table-wrap {{
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 7px;
     overflow: hidden;
   }}
   table {{ width: 100%; border-collapse: collapse; }}
@@ -203,7 +279,7 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
     text-transform: uppercase;
     letter-spacing: 0.4px;
     color: var(--text-soft);
-    background: #f7f8fa;
+    background: var(--surface-2);
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
@@ -228,6 +304,26 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
   .sev-medium   {{ color: var(--med);  background: var(--med-bg); }}
   .sev-low      {{ color: var(--low);  background: var(--low-bg); }}
 
+  /* Impact & how-to-secure guidance */
+  .guidance {{ margin-top: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }}
+  .guidance > summary {{ cursor: pointer; padding: 9px 14px; font-size: 12.5px; font-weight: 600; color: var(--accent); list-style: none; }}
+  .guidance > summary::-webkit-details-marker {{ display: none; }}
+  .guidance > summary::before {{ content: "▸ "; color: var(--text-soft); }}
+  .guidance[open] > summary::before {{ content: "▾ "; }}
+  .guidance-body {{ padding: 4px 14px 12px; }}
+  .exp {{ padding: 10px 0; border-top: 1px solid var(--border); }}
+  .exp:first-child {{ border-top: none; }}
+  .exp-cat {{ font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-soft); margin-bottom: 4px; }}
+  .exp-row {{ display: flex; gap: 10px; font-size: 13px; margin-top: 3px; }}
+  .exp-k {{ flex: 0 0 92px; font-weight: 600; color: var(--text); }}
+
+  /* Local-model AI remediation */
+  .ai-remediation .ai-item {{ background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; }}
+  .ai-head {{ display: flex; gap: 10px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }}
+  .ai-label {{ font-weight: 600; font-size: 13.5px; }}
+  .ai-loc {{ font-size: 12px; color: var(--text-soft); }}
+  .ai-text {{ white-space: pre-wrap; font-family: var(--mono); font-size: 12.5px; margin: 8px 0 0; color: var(--text); }}
+
   .empty {{ padding: 20px; color: var(--text-soft); font-style: italic; }}
   .skipped {{ padding: 18px 20px; color: var(--text-soft); background: #f7f8fa; font-size: 13px; }}
 
@@ -244,7 +340,7 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
   <header>
     <div class="title"><span class="vc">VaultCheck</span> Security Report</div>
     <div class="subtitle">
-      Target <code>{_esc(result.target)}</code> &nbsp;·&nbsp; scanned {ts} &nbsp;·&nbsp; v{_esc(__version__)}
+      Target <code>{_esc(result.target)}</code> &nbsp;·&nbsp; scanned {ts} &nbsp;·&nbsp; v{_esc(__version__)}{filter_note}
     </div>
   </header>
 
@@ -263,20 +359,25 @@ def generate_report(result: ScanResult, output_path: Optional[Path] = None,
     <h2>Secrets</h2>
     <div class="section-sub">Hardcoded credentials and keys detected in source files.</div>
     {secrets_html}
+    {secrets_guidance}
   </section>
 
   <section>
     <h2>Vulnerable dependencies</h2>
     <div class="section-sub">Declared packages with known advisories (source: OSV).</div>
     {deps_html}
+    {deps_guidance}
   </section>
 
   <section>
     <h2>Insecure code</h2>
     <div class="section-sub">Risky patterns detected by static analysis.</div>
     {code_html}
+    {code_guidance}
   </section>
-
+{history_section}
+{licenses_section}
+{ai_section or ""}
   <footer>
     Generated by VaultCheck v{_esc(__version__)} on {ts}. Findings are indicative — review before acting.
     Dependency data from <a href="https://osv.dev">osv.dev</a>.

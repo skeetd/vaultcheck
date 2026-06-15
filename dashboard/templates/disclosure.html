@@ -3,26 +3,92 @@
 {% block extra_css %}
 {% if job and job.status == 'running' %}<meta http-equiv="refresh" content="5">{% endif %}
 <style>
-  .safety{background:#fff8e1;border:1px solid #f3e2a8;color:#7a5e00;border-radius:8px;padding:10px 14px;font-size:12.5px;margin-bottom:18px}
+  /* Collapsible intro (closed by default — click to read the safety notes) */
+  .info-toggle{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--soft);
+               cursor:pointer;border:1px solid var(--border);background:var(--card);border-radius:5px;padding:7px 12px;margin-bottom:16px;user-select:none}
+  .info-toggle:hover{color:var(--text)}
+  .info-toggle svg{transition:transform .15s}
+  .info-panel{display:none;margin:-6px 0 16px}
+  .info-panel.open{display:block}
+  .info-toggle.open svg{transform:rotate(90deg)}
+  .safety{background:var(--surface-2);border:1px solid var(--border);color:var(--soft);border-left:3px solid var(--accent);border-radius:5px;padding:10px 14px;font-size:12.5px;margin-top:10px}
+
   .fetchbar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
   .fetchbar form{display:flex;align-items:center;gap:10px;margin:0}
   .fetchbar select{margin:0;width:auto;padding:7px 8px}
   .fetchbar label{display:inline;margin:0 4px 0 0;text-transform:none;font-weight:500;color:var(--soft)}
   .counts{color:var(--soft);font-size:12.5px}
   .counts b{color:var(--text)}
-  .case .repo{font-weight:600;font-size:14px}
-  .case .owner{color:var(--soft);font-weight:400}
-  .notice-label{font-size:11px;color:var(--soft);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 6px}
-  textarea.notice{min-height:130px;font-size:12px;resize:vertical;margin-bottom:0}
+
+  /* Filter + sort controls */
+  .controls{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 0 14px}
+  .filterbar{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:0}
+  .fpill{font-size:12px;font-weight:600;padding:5px 11px;border-radius:5px;border:1px solid var(--border);
+         background:var(--card);color:var(--soft);cursor:pointer;user-select:none}
+  .fpill:hover{border-color:var(--accent)}
+  .fpill.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .fpill .n{opacity:.65;font-weight:500;margin-left:3px}
+  .fpill.active .n{opacity:.85}
+  .sortbar{display:flex;align-items:center;gap:8px}
+  .sortbar label{display:inline;margin:0;font-size:12px;font-weight:500;color:var(--soft);text-transform:none}
+  .sortbar select{margin:0;width:auto;padding:6px 8px;font-size:12.5px}
+
+  /* Collapsible per-repo case */
+  details.case{background:var(--card);border:1px solid var(--border);border-left-width:3px;border-radius:6px;margin-bottom:9px;overflow:hidden}
+  details.case[open]{box-shadow:0 1px 3px rgba(20,24,33,.06)}
+  details.case[data-sev="CRITICAL"]{border-left-color:var(--crit)}
+  details.case[data-sev="HIGH"]{border-left-color:var(--high)}
+  details.case[data-sev="MEDIUM"]{border-left-color:var(--med)}
+  details.case[data-sev="LOW"]{border-left-color:var(--low)}
+  details.case > summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:11px;padding:12px 15px}
+  details.case > summary::-webkit-details-marker{display:none}
+  summary .repo{font-weight:600;font-size:13.5px;overflow-wrap:anywhere}
+  summary .owner{color:var(--soft);font-weight:400;font-size:12.5px}
+  summary .mini{color:var(--soft);font-size:12px;white-space:nowrap}
+  summary .chev{margin-left:auto;color:var(--muted);flex-shrink:0;transition:transform .15s}
+  details.case[open] > summary .chev{transform:rotate(90deg)}
+  .case-body{padding:4px 15px 16px;border-top:1px solid var(--border)}
+  .sev-row{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px}
+
+  .notice-label{font-size:11px;color:var(--soft);text-transform:uppercase;letter-spacing:.4px;margin:14px 0 6px}
+  textarea.notice{min-height:120px;font-size:12px;resize:vertical;margin-bottom:0}
   .acts{display:flex;gap:8px;margin-top:12px}
   .acts form{margin:0}
+  .open-src{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--accent);
+            border:1px solid var(--accent-soft);background:var(--accent-soft);border-radius:6px;padding:3px 8px;white-space:nowrap}
+  .open-src:hover{text-decoration:none;background:#dbe4f6}
+
+  /* Severity picker in the scan form */
+  .sevpick{display:inline-flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .sevpick label{display:inline-flex;align-items:center;gap:5px;margin:0;text-transform:none;font-weight:500;color:var(--text);font-size:12.5px}
+
+  /* Impact & how-to-secure guidance per case */
+  .guidance{margin:6px 0 4px;border:1px solid var(--border);border-radius:5px;background:var(--surface-2)}
+  .guidance>summary{cursor:pointer;padding:8px 12px;font-size:12.5px;font-weight:600;color:var(--accent);list-style:none}
+  .guidance>summary::-webkit-details-marker{display:none}
+  .guidance>summary::before{content:"▸ ";color:var(--muted)}
+  .guidance[open]>summary::before{content:"▾ "}
+  .guidance-body{padding:2px 12px 10px}
+  .exp{padding:9px 0;border-top:1px solid var(--border)}
+  .exp:first-child{border-top:none}
+  .exp-cat{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--soft);margin-bottom:3px}
+  .exp-row{display:flex;gap:10px;font-size:12.5px;margin-top:3px}
+  .exp-k{flex:0 0 84px;font-weight:600;color:var(--text)}
+  .explain-opt{display:inline-flex;align-items:center;gap:6px;margin:0;text-transform:none;font-weight:500;color:var(--text);font-size:12.5px}
+  .ai-text{white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin:6px 0 0;color:var(--text)}
 </style>
 {% endblock %}
 {% block content %}
   <h1>Public repos — responsible disclosure</h1>
-  <div class="lead">Scan newly-created public repos for exposed secrets, review each masked finding, then send a private notice to the owner. The raw secret is never stored, shown, or used.</div>
 
-  <div class="safety"><b>Safe by design.</b> Values are masked at detection. Send notices privately to the owner — never open a public issue. Never log in with a found credential.</div>
+  <div class="info-toggle" id="info-toggle">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    About &amp; safety
+  </div>
+  <div class="info-panel" id="info-panel">
+    <div class="lead" style="margin-bottom:0">Scan newly-created public repos for exposed secrets, review each masked finding, then send a private notice to the owner. The raw secret is never stored, shown, or used.</div>
+    <div class="safety"><b>Safe by design.</b> Values are masked at detection. Send notices privately to the owner — never open a public issue. Never log in with a found credential.</div>
+  </div>
 
   {% with messages = get_flashed_messages(with_categories=True) %}
     {% for category, message in messages %}
@@ -40,6 +106,13 @@
       <label>Scan until</label>
       <input type="number" name="target" value="{{ job.target if job and job.target else 10 }}" min="1" max="50" style="width:78px;margin:0">
       <label>findings</label>
+      <span class="sevpick" title="Leave all unchecked to collect every severity">
+        {% set chosen = (job.severities if job and job.severities else []) %}
+        {% for s in ['CRITICAL','HIGH','MEDIUM','LOW'] %}
+        <label><input type="checkbox" name="severity" value="{{ s }}" {% if s in chosen %}checked{% endif %}> {{ s|capitalize }}</label>
+        {% endfor %}
+      </span>
+      <label class="explain-opt" title="Adds offline AI remediation from your local vuln-explainer model"><input type="checkbox" name="explain" value="1" {% if job and job.explain %}checked{% endif %}> Explain (local model)</label>
       <button class="btn-primary" type="submit" {% if job and job.status == 'running' %}disabled{% endif %}>
         {% if job and job.status == 'running' %}Scanning…{% else %}Start scan{% endif %}
       </button>
@@ -52,7 +125,7 @@
 
   {% if job and job.status == 'running' %}
   <div class="flash ok" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-    <span>Scanning new public repos… <b>{{ job.scanned }}</b> repos scanned, <b>{{ job.found }}</b>/{{ job.target }} findings.</span>
+    <span>Scanning new public repos{% if job.severities %} for <b>{{ job.severities|join(', ') }}</b>{% endif %}… <b>{{ job.scanned }}</b> repos scanned, <b>{{ job.found }}</b>/{{ job.target }} findings.</span>
     <span class="note">auto-refreshing every 5s…</span>
   </div>
   {% elif job and job.status == 'done' and job.scanned %}
@@ -61,34 +134,98 @@
 
   <h2>Pending review</h2>
   {% if pending %}
-    {% for case in pending %}
-    <div class="card case">
-      <div class="repo"><a href="{{ case.repo_url or 'https://github.com/' + case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a>
-        <span class="owner">· owner @{{ case.owner }}</span></div>
-      <div class="table-wrap" style="margin:10px 0">
-        <table>
-          <thead><tr><th>Kind</th><th>Type</th><th>Severity</th><th>Location</th><th>Context (masked)</th></tr></thead>
-          <tbody>
-            {% for f in case.findings %}
-            <tr>
-              <td>{{ f.kind or 'Secret' }}</td>
-              <td>{{ f.type or f.secret_type }}</td>
-              <td><span class="pill sev-{{ (f.severity or 'low')|lower }}">{{ f.severity or '—' }}</span></td>
-              <td class="mono">{% if f.url %}<a href="{{ f.url }}" target="_blank" rel="noopener">{{ f.file }}:{{ f.line }}</a>{% else %}{{ f.file }}:{{ f.line }}{% endif %}</td>
-              <td class="mono" style="overflow-wrap:anywhere">{{ f.context or f.detail or f.masked_value }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+    <div class="controls">
+      <div class="filterbar" id="filterbar">
+        <span class="fpill active" data-filter="ALL" onclick="discFilter(this)">All <span class="n">{{ pending|length }}</span></span>
+        {% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}{% if buckets[sev] %}
+        <span class="fpill" data-filter="{{ sev }}" onclick="discFilter(this)">{{ sev|capitalize }} <span class="n">{{ buckets[sev] }}</span></span>
+        {% endif %}{% endfor %}
       </div>
-      <div class="notice-label">Private notice to owner (copy &amp; send)</div>
-      <textarea class="notice" readonly>{{ case.notice }}</textarea>
-      <div class="acts">
-        <form method="POST" action="/disclosure/{{ case.id }}/approve"><button class="btn-primary" type="submit">Approve</button></form>
-        <form method="POST" action="/disclosure/{{ case.id }}/dismiss"><button class="btn-danger" type="submit">Dismiss — false positive</button></form>
+      <div class="sortbar">
+        <label for="disc-sort">Sort</label>
+        <select id="disc-sort" onchange="discSort()">
+          <option value="severity">Criticality (high → low)</option>
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="findings">Most findings</option>
+          <option value="repo">Repository A–Z</option>
+        </select>
       </div>
     </div>
+
+    <div id="pending-list">
+    {% for case in pending %}
+    <details class="case" data-sev="{{ case.worst }}" data-created="{{ case.created_at }}"
+             data-count="{{ case.finding_count }}" data-repo="{{ case.repo|lower }}">
+      <summary>
+        <span class="pill sev-{{ case.worst|lower }}">{{ case.worst }}</span>
+        <span class="repo">{{ case.repo }}</span>
+        <span class="owner">@{{ case.owner }}</span>
+        <span class="mini">{{ case.finding_count }} finding{{ 's' if case.finding_count != 1 else '' }}</span>
+        <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="case-body">
+        <div class="repo" style="margin-top:10px"><a href="{{ case.repo_url or 'https://github.com/' + case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a></div>
+        <div class="sev-row">
+          {% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}{% if case.counts_by_sev[sev] %}<span class="pill sev-{{ sev|lower }}">{{ case.counts_by_sev[sev] }} {{ sev|lower }}</span>{% endif %}{% endfor %}
+        </div>
+        <div class="table-wrap" style="margin:10px 0">
+          <table>
+            <thead><tr><th>Kind</th><th>Type</th><th>Severity</th><th>Location</th><th>Context (masked)</th><th>Source</th></tr></thead>
+            <tbody>
+              {% for f in case.findings %}
+              <tr>
+                <td>{{ f.kind or 'Secret' }}</td>
+                <td>{{ f.type or f.secret_type }}</td>
+                <td><span class="pill sev-{{ (f.severity or 'low')|lower }}">{{ f.severity or '—' }}</span></td>
+                <td class="mono">{{ f.file }}:{{ f.line }}</td>
+                <td class="mono" style="overflow-wrap:anywhere">{{ f.context or f.detail or f.masked_value }}</td>
+                <td>{% if f.url %}<a class="open-src" href="{{ f.url }}" target="_blank" rel="noopener">Open at line {{ f.line }}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H8M17 7v9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>{% else %}<span class="note">—</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if case.guidance %}
+        <details class="guidance">
+          <summary>What these mean &amp; how to secure</summary>
+          <div class="guidance-body">
+            {% for g in case.guidance %}
+            <div class="exp">
+              <div class="exp-cat">{{ g.cat }}</div>
+              <div class="exp-row"><span class="exp-k">Impact</span><span>{{ g.impact }}</span></div>
+              <div class="exp-row"><span class="exp-k">How to secure</span><span>{{ g.fix }}</span></div>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+        {% set ai_findings = case.findings | selectattr('ai') | list %}
+        {% if ai_findings %}
+        <details class="guidance" open>
+          <summary>AI remediation (local model)</summary>
+          <div class="guidance-body">
+            {% for f in ai_findings %}
+            <div class="exp">
+              <div class="exp-cat">{{ f.type or f.secret_type }} — <span class="mono">{{ f.file }}:{{ f.line }}</span></div>
+              <pre class="ai-text">{{ f.ai }}</pre>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+        <div class="notice-label">Private notice to owner (copy &amp; send)</div>
+        <textarea class="notice" readonly>{{ case.notice }}</textarea>
+        <div class="acts">
+          <form method="POST" action="/disclosure/{{ case.id }}/approve"><button class="btn-primary" type="submit">Approve</button></form>
+          <form method="POST" action="/disclosure/{{ case.id }}/dismiss"><button class="btn-danger" type="submit">Dismiss — false positive</button></form>
+        </div>
+      </div>
+    </details>
     {% endfor %}
+    </div>
+    <p class="note" id="filter-empty" style="display:none">No repos in this category.</p>
   {% else %}
     <p class="empty">Nothing pending — hit fetch to scan new repos.</p>
   {% endif %}
@@ -96,18 +233,79 @@
   <h2>Approved — ready to disclose</h2>
   {% if approved %}
     {% for case in approved %}
-    <div class="card case">
-      <div class="repo"><a href="{{ case.repo_url or 'https://github.com/' + case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a>
-        <span class="owner">· owner @{{ case.owner }}</span></div>
-      <div class="notice-label">Send this privately to the owner, then mark disclosed</div>
-      <textarea class="notice" readonly>{{ case.notice }}</textarea>
-      <div class="acts">
-        <form method="POST" action="/disclosure/{{ case.id }}/disclosed"><button class="btn-primary" type="submit">Mark disclosed</button></form>
-        <form method="POST" action="/disclosure/{{ case.id }}/dismiss"><button class="btn-danger" type="submit">Dismiss</button></form>
+    <details class="case" data-sev="{{ case.worst }}">
+      <summary>
+        <span class="pill sev-{{ case.worst|lower }}">{{ case.worst }}</span>
+        <span class="repo">{{ case.repo }}</span>
+        <span class="owner">@{{ case.owner }}</span>
+        <span class="mini">{{ case.finding_count }} finding{{ 's' if case.finding_count != 1 else '' }}</span>
+        <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </summary>
+      <div class="case-body">
+        <div class="repo" style="margin-top:10px"><a href="{{ case.repo_url or 'https://github.com/' + case.repo }}" target="_blank" rel="noopener">{{ case.repo }}</a></div>
+        <div class="notice-label">Send this privately to the owner, then mark disclosed</div>
+        <textarea class="notice" readonly>{{ case.notice }}</textarea>
+        <div class="acts">
+          <form method="POST" action="/disclosure/{{ case.id }}/disclosed"><button class="btn-primary" type="submit">Mark disclosed</button></form>
+          <form method="POST" action="/disclosure/{{ case.id }}/dismiss"><button class="btn-danger" type="submit">Dismiss</button></form>
+        </div>
       </div>
-    </div>
+    </details>
     {% endfor %}
   {% else %}
     <p class="empty">None approved yet.</p>
   {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  // Collapsible intro — closed by default, remembers your choice
+  (function(){
+    var key='vc_disc_info', t=document.getElementById('info-toggle'), p=document.getElementById('info-panel');
+    if(!t||!p) return;
+    if(localStorage.getItem(key)==='1'){p.classList.add('open');t.classList.add('open');}
+    t.addEventListener('click',function(){
+      var open=p.classList.toggle('open');t.classList.toggle('open',open);
+      localStorage.setItem(key, open?'1':'0');
+    });
+  })();
+
+  // Filter pending repos by criticality
+  function discFilter(el){
+    var sev=el.getAttribute('data-filter'), shown=0;
+    document.querySelectorAll('#filterbar .fpill').forEach(function(p){p.classList.toggle('active',p===el);});
+    document.querySelectorAll('#pending-list details.case').forEach(function(d){
+      var match=(sev==='ALL'||d.getAttribute('data-sev')===sev);
+      d.style.display=match?'':'none'; if(match) shown++;
+    });
+    var empty=document.getElementById('filter-empty'); if(empty) empty.style.display=shown?'none':'block';
+  }
+
+  // Sort pending repos — reorders the cards in place (works alongside the filter)
+  var SORT_KEY='vc_disc_sort', SEV_RANK={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
+  function cmp(x,y){ return x<y?-1:(x>y?1:0); }
+  function discSort(){
+    var sel=document.getElementById('disc-sort'), list=document.getElementById('pending-list');
+    if(!sel||!list) return;
+    var mode=sel.value;
+    localStorage.setItem(SORT_KEY, mode);
+    var items=Array.prototype.slice.call(list.querySelectorAll('details.case'));
+    items.sort(function(a,b){
+      switch(mode){
+        case 'newest':   return cmp(b.dataset.created, a.dataset.created);
+        case 'oldest':   return cmp(a.dataset.created, b.dataset.created);
+        case 'findings': return (+b.dataset.count - +a.dataset.count) || cmp(a.dataset.repo, b.dataset.repo);
+        case 'repo':     return cmp(a.dataset.repo, b.dataset.repo);
+        default: // criticality: worst first, then newest within a tier
+          return (SEV_RANK[a.dataset.sev]-SEV_RANK[b.dataset.sev]) || cmp(b.dataset.created, a.dataset.created);
+      }
+    });
+    items.forEach(function(d){ list.appendChild(d); });
+  }
+  (function(){
+    var sel=document.getElementById('disc-sort'); if(!sel) return;
+    var saved=localStorage.getItem(SORT_KEY);
+    if(saved){ sel.value=saved; }
+    discSort();
+  })();
+</script>
 {% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — My account{% endblock %}
+{% block content %}
+  <h1>My account</h1>
+  <div class="lead">Your plan, usage and recent activity.</div>
+
+  {% with messages = get_flashed_messages(with_categories=True) %}
+    {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+  {% endwith %}
+
+  <div class="stats">
+    <div class="stat"><div class="n">{{ plan|upper }}</div><div class="l">Plan</div></div>
+    <div class="stat"><div class="n">{{ used }}</div><div class="l">Scans this month</div></div>
+    <div class="stat"><div class="n">{% if remaining is none %}∞{% else %}{{ remaining }}{% endif %}</div><div class="l">Remaining</div></div>
+  </div>
+
+  <div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap">
+    <div>
+      <div style="font-weight:600">{{ user.username }} <span class="note">· {{ user.email }}</span></div>
+      {% if plan == 'pro' %}
+        <div class="note">Pro{% if user.pro_until %} — active until {{ user.pro_until[:10] }}{% else %} — no expiry{% endif %}.</div>
+      {% else %}
+        <div class="note">Free plan — {{ quota }} scans per month. Upgrade for unlimited scans, dependency analysis and scheduled scans.</div>
+      {% endif %}
+    </div>
+    {% if plan != 'pro' %}<a class="btn btn-primary" href="/billing">Upgrade to Pro</a>{% else %}<a class="btn" href="/billing">Manage billing</a>{% endif %}
+  </div>
+
+  <h2>Recent scans</h2>
+  {% if scans %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When</th><th>Type</th><th>Target</th><th>Findings</th></tr></thead>
+      <tbody>
+        {% for s in scans %}
+        <tr>
+          <td style="color:var(--soft);white-space:nowrap">{{ s.created_at[:16].replace('T',' ') }}</td>
+          <td>{{ s.kind }}</td>
+          <td class="mono" style="overflow-wrap:anywhere">{{ s.target }}</td>
+          <td>{% for sev in ['CRITICAL','HIGH','MEDIUM','LOW'] %}{% if s.counts[sev] %}<span class="pill sev-{{ sev|lower }}">{{ s.counts[sev] }}</span> {% endif %}{% endfor %}{% if not s.total %}<span class="note">clean</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No scans yet — <a href="/scan">run your first scan</a>.</p>
+  {% endif %}
+{% endblock %}

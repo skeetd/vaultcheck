@@ -5,3 +5,5 @@ requests>=2.31
 gitpython>=3.1
 jinja2>=3.1
 click>=8.1
+stripe>=8.0  # optional — billing degrades gracefully if absent/unconfigured
+reportlab>=4.0  # PDF report export (run.py scan --pdf)

@@ -1,0 +1,18 @@
+{% extends "auth_base.html" %}
+{% block title %}VaultCheck — Create account{% endblock %}
+{% block card %}
+  <h2>Create your account</h2>
+  <div class="sub">Free plan — {{ 20 }} scans a month, no card required.</div>
+  {% if error %}<div class="msg error">{{ error }}</div>{% endif %}
+  <form method="POST" action="/signup">
+    <label>Username</label>
+    <input type="text" name="username" value="{{ username or '' }}" autofocus required>
+    <label>Email</label>
+    <input type="email" name="email" value="{{ email or '' }}" required>
+    <label>Password</label>
+    <input type="password" name="password" required>
+    <div class="hint">At least 8 characters.</div>
+    <button type="submit">Create free account</button>
+  </form>
+  <div class="alt">Already have an account? <a href="/login">Sign in</a></div>
+{% endblock %}

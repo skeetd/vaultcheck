@@ -5,17 +5,44 @@
   <h1>Scan a repository</h1>
   <div class="lead">Scan a GitHub repository for hardcoded secrets, vulnerable dependencies and insecure code.</div>
 
+  {% if remaining is not none %}
+  <div class="flash {{ 'error' if remaining == 0 else 'ok' }}" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <span>{% if remaining == 0 %}You've used all your free scans this month.{% else %}<b>{{ remaining }}</b> free scan{{ 's' if remaining != 1 else '' }} left this month.{% endif %}</span>
+    <a href="/billing" style="font-weight:600">Upgrade to Pro →</a>
+  </div>
+  {% endif %}
+
   {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
 
   <div class="card">
     <form method="POST" action="/scan">
       <label>GitHub repository URL</label>
       <input class="mono" type="url" name="repo_url" placeholder="https://github.com/owner/repo" required autofocus>
+      <label>Severity filter <span class="note" style="text-transform:none;font-weight:400">— leave all unchecked to report everything</span></label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin:2px 0 16px">
+        <label style="display:inline-flex;align-items:center;gap:6px;text-transform:none;font-weight:500;margin:0"><input type="checkbox" name="severity" value="CRITICAL"> Critical</label>
+        <label style="display:inline-flex;align-items:center;gap:6px;text-transform:none;font-weight:500;margin:0"><input type="checkbox" name="severity" value="HIGH"> High</label>
+        <label style="display:inline-flex;align-items:center;gap:6px;text-transform:none;font-weight:500;margin:0"><input type="checkbox" name="severity" value="MEDIUM"> Medium</label>
+        <label style="display:inline-flex;align-items:center;gap:6px;text-transform:none;font-weight:500;margin:0"><input type="checkbox" name="severity" value="LOW"> Low</label>
+      </div>
+      <label style="display:inline-flex;align-items:center;gap:8px;text-transform:none;font-weight:500;margin:0 0 16px"><input type="checkbox" name="explain" value="1"> Explain findings with my local model <span class="note" style="text-transform:none;font-weight:400">(offline Ollama vuln-explainer; slower)</span></label>
       <button class="btn-primary" type="submit">Scan repository</button>
     </form>
     <div class="note" style="margin-top:14px">
       Scans for secrets, vulnerable dependencies and insecure code.
       Run only on repositories you own or are authorized to test.
+    </div>
+  </div>
+
+  <div class="card">
+    <form method="POST" action="/rescan">
+      <label>Re-scan &amp; show changes</label>
+      <input class="mono" type="url" name="repo_url" placeholder="https://github.com/owner/repo" required>
+      <button class="btn-primary" type="submit">Re-scan &amp; diff</button>
+    </form>
+    <div class="note" style="margin-top:14px">
+      Compares against the most recent scan of the same repository and reports what is
+      <b>new</b> or <b>fixed</b>. Sends a notification if Slack/webhook is configured.
     </div>
   </div>
 {% endblock %}

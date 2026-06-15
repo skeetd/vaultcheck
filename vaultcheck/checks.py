@@ -10,6 +10,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import socket
 import ssl
 import time
@@ -312,19 +313,46 @@ def _hostname(target: str) -> str:
 
 
 def check_subdomains(domain: str) -> CheckResult:
-    """Discover subdomains from Certificate Transparency logs (crt.sh). Passive."""
+    """Discover subdomains from Certificate Transparency logs (crt.sh). Passive.
+
+    crt.sh is free but frequently rate-limits or returns 502/503, so transient
+    failures are retried with a short backoff before giving up.
+    """
     domain = _hostname(domain)
     if not domain:
         return CheckResult("subdomains", domain, [], ["Enter a domain like example.com."])
-    try:
-        req = urllib.request.Request(
-            f"https://crt.sh/?q={urllib.parse.quote('%.' + domain)}&output=json",
-            headers={"User-Agent": "vaultcheck"},
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read() or "[]")
-    except Exception as exc:  # noqa: BLE001
-        return CheckResult("subdomains", domain, [], [f"crt.sh lookup failed: {exc}"])
+    url = f"https://crt.sh/?q={urllib.parse.quote('%.' + domain)}&output=json"
+    data = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "vaultcheck", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read() or b"[]")
+            last_err = None
+            break
+        except urllib.error.HTTPError as exc:
+            last_err = exc
+            if exc.code in (429, 502, 503, 504) and attempt < 2:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            break
+        except (urllib.error.URLError, TimeoutError, ValueError) as exc:  # incl. JSON/timeout
+            last_err = exc
+            if attempt < 2:
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            break
+
+    if data is None:
+        if isinstance(last_err, urllib.error.HTTPError):
+            msg = (f"crt.sh returned HTTP {last_err.code} after 3 tries — the service rate-limits "
+                   f"and 502s often. Wait a moment and re-run.")
+        else:
+            msg = ("crt.sh is unreachable right now (it rate-limits and 502s often). "
+                   "Wait a moment and re-run.")
+        return CheckResult("subdomains", domain, [], [msg])
 
     subs = set()
     for entry in data:
@@ -454,6 +482,201 @@ def check_exposed_files(url: str) -> CheckResult:
             continue
     return CheckResult("exposed-files", base, findings, [],
                        summary="None of the probed paths were exposed." if not findings else "")
+
+
+# Common query-string parameter names used for post-login/logout redirects, where
+# open-redirect vulnerabilities are most often found.
+_REDIRECT_PARAMS = ["redirect", "redirect_uri", "redirect_url", "url", "next", "return",
+                    "returnUrl", "return_to", "continue", "dest", "destination", "go", "target"]
+
+# Payloads that should NOT be reflected back as a same-host redirect target.
+_REDIRECT_PAYLOADS = [
+    "https://vaultcheck-redirect-probe.example",
+    "//vaultcheck-redirect-probe.example",
+    "https:vaultcheck-redirect-probe.example",
+    "/\\/vaultcheck-redirect-probe.example",
+]
+
+
+class _NoRedirect(urllib.request.HTTPErrorProcessor):
+    def http_response(self, request, response):
+        return response
+    https_response = http_response
+
+
+def check_open_redirect(url: str) -> CheckResult:
+    """Probe common redirect parameters for unvalidated open-redirect targets.
+
+    Sends each known redirect-param name with an external payload host and checks
+    whether the response is a 3xx that redirects to that external host. Passive
+    (no auth, no state changes) — limited to GET requests on the given URL.
+    """
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+    if not host or not _resolves_public(host):
+        return CheckResult("open-redirect", url, [], ["Refusing to probe a private or unresolvable host."])
+
+    opener = urllib.request.build_opener(_NoRedirect)
+    findings = []
+    checked = 0
+    seen_params = set()
+
+    for param in _REDIRECT_PARAMS:
+        for payload in _REDIRECT_PAYLOADS[:2]:  # bound total requests
+            query = urllib.parse.parse_qsl(parsed.query)
+            query.append((param, payload))
+            probe_url = urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query)))
+            checked += 1
+            try:
+                req = urllib.request.Request(probe_url, headers={"User-Agent": "vaultcheck"})
+                with opener.open(req, timeout=10) as resp:
+                    if 300 <= resp.status < 400:
+                        location = resp.headers.get("Location", "")
+                        loc_host = urllib.parse.urlparse(location).hostname
+                        if loc_host == "vaultcheck-redirect-probe.example" or "vaultcheck-redirect-probe.example" in location:
+                            if param not in seen_params:
+                                seen_params.add(param)
+                                findings.append(CheckFinding(
+                                    "MEDIUM", f"Open redirect via '{param}' parameter",
+                                    f"Request with ?{param}=<external URL> returned a {resp.status} redirect to an "
+                                    f"attacker-controlled host. Validate redirect targets against an allowlist."
+                                ))
+            except Exception:  # noqa: BLE001
+                continue
+            if checked >= 24:  # hard cap on requests for this check
+                break
+        if checked >= 24:
+            break
+
+    return CheckResult("open-redirect", url, findings, [],
+                       summary="No open redirect found in common parameters." if not findings
+                       else "")
+
+
+def check_https_redirect(target: str) -> CheckResult:
+    """Check that plain HTTP redirects to HTTPS and review HSTS strength/preload."""
+    host = urllib.parse.urlparse(target).hostname if target.startswith(("http://", "https://")) else target
+    host = (host or "").strip().strip("/").lower()
+    if not host or not _resolves_public(host):
+        return CheckResult("https-redirect", target, [], ["Refusing to check a private or unresolvable host."])
+
+    findings = []
+    # 1) Does http:// redirect to https://?
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        req = urllib.request.Request(f"http://{host}/", headers={"User-Agent": "vaultcheck"})
+        with opener.open(req, timeout=12) as resp:
+            status = resp.status
+            location = resp.headers.get("Location", "")
+        if 300 <= status < 400:
+            if not location.startswith("https://"):
+                findings.append(CheckFinding("MEDIUM", "HTTP redirects, but not to HTTPS",
+                                             f"HTTP responded {status} to {location or '(no Location)'}."))
+        elif status == 200:
+            findings.append(CheckFinding("HIGH", "HTTP served directly (no HTTPS redirect)",
+                                         "Plain HTTP returns content instead of redirecting to HTTPS."))
+    except Exception as exc:  # noqa: BLE001
+        findings.append(CheckFinding("LOW", "Could not reach site over HTTP", str(exc)))
+
+    # 2) HSTS header strength on the HTTPS endpoint
+    try:
+        req = urllib.request.Request(f"https://{host}/", headers={"User-Agent": "vaultcheck"})
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            hsts = resp.headers.get("Strict-Transport-Security", "")
+        if not hsts:
+            findings.append(CheckFinding("MEDIUM", "No HSTS header",
+                                         "Add Strict-Transport-Security to force HTTPS on future visits."))
+        else:
+            m = re.search(r"max-age\s*=\s*(\d+)", hsts, re.I)
+            max_age = int(m.group(1)) if m else 0
+            if max_age < 15552000:  # ~180 days, the preload minimum
+                findings.append(CheckFinding("LOW", "HSTS max-age below preload threshold",
+                                             f"max-age={max_age}; use ≥15552000 (180d) for HSTS preload eligibility."))
+            if "includesubdomains" not in hsts.lower():
+                findings.append(CheckFinding("LOW", "HSTS missing includeSubDomains",
+                                             "Add includeSubDomains so subdomains are also protected."))
+            if "preload" not in hsts.lower():
+                findings.append(CheckFinding("LOW", "HSTS not preload-ready",
+                                             "Add the preload directive and submit to hstspreload.org."))
+    except Exception as exc:  # noqa: BLE001
+        findings.append(CheckFinding("LOW", "Could not reach site over HTTPS", str(exc)))
+
+    return CheckResult("https-redirect", host, findings, [],
+                       summary="HTTP→HTTPS redirect and HSTS look good." if not findings else "")
+
+
+def check_cookies(url: str) -> CheckResult:
+    """Inspect Set-Cookie flags in depth: Secure, HttpOnly, SameSite."""
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    host = urllib.parse.urlparse(url).hostname
+    if not host or not _resolves_public(host):
+        return CheckResult("cookies", url, [], ["Refusing to check a private or unresolvable host."])
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "vaultcheck"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            cookies = resp.headers.get_all("Set-Cookie") or []
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("cookies", url, [], [f"Could not fetch {url}: {exc}"])
+
+    if not cookies:
+        return CheckResult("cookies", url, [], [], summary="No cookies set on this response.")
+
+    findings = []
+    for c in cookies:
+        name = c.split("=", 1)[0].strip()
+        low = c.lower()
+        if "secure" not in low:
+            findings.append(CheckFinding("MEDIUM", f"Cookie '{name}' missing Secure",
+                                         "May be transmitted over plain HTTP."))
+        if "httponly" not in low:
+            findings.append(CheckFinding("LOW", f"Cookie '{name}' missing HttpOnly",
+                                         "Readable by JavaScript — XSS can steal it."))
+        if "samesite" not in low:
+            findings.append(CheckFinding("LOW", f"Cookie '{name}' missing SameSite",
+                                         "Set SameSite=Lax or Strict to mitigate CSRF."))
+        elif "samesite=none" in low and "secure" not in low:
+            findings.append(CheckFinding("MEDIUM", f"Cookie '{name}' SameSite=None without Secure",
+                                         "SameSite=None requires the Secure attribute."))
+    return CheckResult("cookies", host, findings, [],
+                       summary=f"Inspected {len(cookies)} cookie(s)." if not findings else "")
+
+
+_MIXED_CONTENT_RE = re.compile(
+    r"""(?:src|href)\s*=\s*['"]http://[^'"]+['"]""", re.I)
+_MIXED_RESOURCE_RE = re.compile(r"""['"]http://[^'"]+\.(?:js|css|png|jpe?g|gif|svg|woff2?|mp4|webp)['"]""", re.I)
+
+
+def check_mixed_content(url: str) -> CheckResult:
+    """Find HTTP (insecure) sub-resources referenced by an HTTPS page."""
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+    if not host or not _resolves_public(host):
+        return CheckResult("mixed-content", url, [], ["Refusing to check a private or unresolvable host."])
+    if parsed.scheme != "https":
+        url = "https://" + host + (parsed.path or "/")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "vaultcheck"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status != 200:
+                return CheckResult("mixed-content", url, [], [], summary=f"Page returned {resp.status}.")
+            body = resp.read(500_000).decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult("mixed-content", url, [], [f"Could not fetch {url}: {exc}"])
+
+    hits = set(_MIXED_CONTENT_RE.findall(body)) | set(_MIXED_RESOURCE_RE.findall(body))
+    # Extract the offending URLs (bounded list)
+    urls = re.findall(r"http://[^'\"\s>]+", " ".join(hits))[:15]
+    findings = []
+    for u in sorted(set(urls)):
+        findings.append(CheckFinding("MEDIUM", "Insecure (HTTP) resource on HTTPS page",
+                                     f"{u} — browsers may block it or warn; load it over HTTPS."))
+    return CheckResult("mixed-content", host, findings, [],
+                       summary="No mixed (HTTP) content found." if not findings else "")
 
 
 def check_rdap(domain: str) -> CheckResult:

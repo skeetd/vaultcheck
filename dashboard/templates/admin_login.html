@@ -1,0 +1,13 @@
+{% extends "auth_base.html" %}
+{% block title %}VaultCheck — Operator sign-in{% endblock %}
+{% block card %}
+  <h2>Operator sign-in</h2>
+  <div class="sub">Admin access to the dashboard, users and disclosure queue.</div>
+  {% if error %}<div class="msg error">{{ error }}</div>{% endif %}
+  <form method="POST" action="/admin/login">
+    <label>Admin password</label>
+    <input type="password" name="password" autofocus required>
+    <button type="submit">Sign in</button>
+  </form>
+  <div class="alt"><a href="/login">← Customer sign-in</a></div>
+{% endblock %}

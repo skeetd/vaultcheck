@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}VaultCheck — Billing{% endblock %}
+{% block wrapclass %}narrow{% endblock %}
+{% block extra_css %}
+<style>
+  .plans{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:6px 0 8px}
+  @media (max-width:620px){.plans{grid-template-columns:1fr}}
+  .plan{border:1px solid var(--border);border-radius:var(--radius);padding:22px;background:var(--card)}
+  .plan.pro{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .plan h3{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--soft);margin-bottom:2px}
+  .plan .price{font-size:26px;font-weight:700;letter-spacing:-.5px;margin:6px 0 12px}
+  .plan .price small{font-size:13px;font-weight:500;color:var(--soft)}
+  .plan ul{list-style:none;margin:0 0 16px;display:flex;flex-direction:column;gap:9px}
+  .plan li{display:flex;gap:9px;align-items:flex-start;font-size:13.5px;color:var(--text)}
+  .plan li svg{flex-shrink:0;color:var(--green);margin-top:2px}
+  .current{font-size:12px;color:var(--accent);font-weight:600}
+</style>
+{% endblock %}
+{% block content %}
+  <h1>Billing &amp; plans</h1>
+  <div class="lead">You're currently on the <b>{{ plan|upper }}</b> plan.</div>
+
+  {% with messages = get_flashed_messages(with_categories=True) %}
+    {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+  {% endwith %}
+
+  <div class="plans">
+    <div class="plan">
+      <h3>Free {% if plan != 'pro' %}<span class="current">· current</span>{% endif %}</h3>
+      <div class="price">$0</div>
+      <ul>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> 20 scans / month</li>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Secret &amp; insecure-code scanning</li>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> 15 network &amp; domain checks</li>
+      </ul>
+    </div>
+    <div class="plan pro">
+      <h3>Pro {% if plan == 'pro' %}<span class="current">· current</span>{% endif %}</h3>
+      <div class="price">{{ price_label }}</div>
+      <ul>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> <b>Unlimited</b> scans</li>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Dependency CVE analysis</li>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Scheduled scans</li>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Git-history secret scanning</li>
+      </ul>
+      {% if plan == 'pro' %}
+        <button class="btn" disabled>You're on Pro</button>
+      {% elif stripe_ready %}
+        <form method="POST" action="/billing/checkout"><button class="btn-primary" type="submit" style="width:100%">Upgrade to Pro</button></form>
+      {% else %}
+        <button class="btn-primary" style="width:100%" disabled>Upgrade to Pro</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not stripe_ready and plan != 'pro' %}
+  <div class="card">
+    <div style="font-weight:600;margin-bottom:6px">Manual upgrade</div>
+    <div class="note">Online card payments aren't enabled on this instance. To go Pro, contact the operator with your account email
+      (<span class="mono">{{ user.email }}</span>) and they'll activate Pro for you. (Operators: set <span class="mono">STRIPE_SECRET_KEY</span>
+      and <span class="mono">STRIPE_PRICE_ID</span> to enable self-serve checkout.)</div>
+  </div>
+  {% endif %}
+{% endblock %}
